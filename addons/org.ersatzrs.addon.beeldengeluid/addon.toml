@@ -1,0 +1,74 @@
+manifest_version = 1
+id = "org.ersatzrs.addon.beeldengeluid"
+version = "0.1.0"
+license = "GPL-3.0-or-later"
+source_url = "https://github.com/bartdeijkers/ErsatzRS-addons/tree/main/addons/org.ersatzrs.addon.beeldengeluid"
+host_version = ">=0.1.0, <0.2.0"
+
+[name]
+"en-US" = "Beeld & Geluid"
+nl = "Beeld & Geluid"
+"fr-FR" = "Beeld & Geluid"
+pl = "Beeld & Geluid"
+"pt-BR" = "Beeld & Geluid"
+
+[summary]
+"en-US" = "Enumerate and play programmes from the Beeld & Geluid Schatkamer."
+nl = "Toon en speel programma's uit de Schatkamer van Beeld & Geluid."
+"fr-FR" = "Répertorie et lit les programmes de la Schatkamer de Beeld & Geluid."
+pl = "Wyświetla i odtwarza programy z archiwum Schatkamer Beeld & Geluid."
+"pt-BR" = "Lista e reproduz programas da Schatkamer do Beeld & Geluid."
+
+[[capabilities]]
+id = "addon.check.v1"
+
+[[capabilities]]
+id = "remote-stream.list.v1"
+
+[[capabilities]]
+id = "remote-stream.play.v1"
+
+[entrypoints."linux-x64"]
+path = "addon.sh"
+kind = "posix_shell"
+
+[entrypoints."linux-arm64"]
+path = "addon.sh"
+kind = "posix_shell"
+
+[entrypoints."linux-arm"]
+path = "addon.sh"
+kind = "posix_shell"
+
+[entrypoints."osx-x64"]
+path = "addon.sh"
+kind = "posix_shell"
+
+[entrypoints."osx-arm64"]
+path = "addon.sh"
+kind = "posix_shell"
+
+[entrypoints."win-x64"]
+path = "addon.bat"
+kind = "windows_batch"
+
+[permissions]
+network_hosts = ["schatkamer.beeldengeluid.nl", "sk-video.cdn.beeldengeluid.nl"]
+media_read = false
+managed_ffmpeg = true
+external_commands = ["curl", "awk", "grep", "dd", "sed", "mktemp", "powershell.exe"]
+
+[[settings]]
+key = "CURL_BIN"
+label = { "en-US" = "curl executable", nl = "curl-programma", "fr-FR" = "Exécutable curl", pl = "Program curl", "pt-BR" = "Executável curl" }
+kind = "executable"
+required = false
+default = "curl"
+options = []
+
+[[settings]]
+key = "ACTION_ID"
+label = { "en-US" = "Emergency Server Action ID", nl = "Server Action-ID voor noodgevallen", "fr-FR" = "ID Server Action de secours", pl = "Awaryjny identyfikator Server Action", "pt-BR" = "ID de emergência do Server Action" }
+kind = "string"
+required = false
+options = []

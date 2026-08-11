@@ -1,0 +1,50 @@
+name: Publish signed add-on repository
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 3 */14 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test repository tooling and entrypoints
+        run: python3 -m unittest discover -s tests
+      - name: Build packages and unsigned index
+        run: >-
+          python3 tools/build_repository.py
+          --sequence "${GITHUB_RUN_NUMBER}"
+          --base-url https://bartdeijkers.github.io/ErsatzRS-addons
+          --output dist
+      - name: Sign exact catalog bytes
+        env:
+          SIGNING_KEY_PEM: ${{ secrets.ADDON_REPOSITORY_SIGNING_KEY_PEM }}
+        run: |
+          test -n "$SIGNING_KEY_PEM"
+          umask 077
+          install -m 600 /dev/null "$RUNNER_TEMP/addon-repository-signing-key.pem"
+          printf '%s' "$SIGNING_KEY_PEM" > "$RUNNER_TEMP/addon-repository-signing-key.pem"
+          tools/sign_catalog.sh "$RUNNER_TEMP/addon-repository-signing-key.pem" dist/index-v1.json dist/index-v1.json.sig
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+      - name: Deploy GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

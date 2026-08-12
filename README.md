@@ -32,8 +32,8 @@ python3 tools/build_repository.py \
   --output dist
 ```
 
-This creates deterministic ZIP packages and the exact `index-v1.json` bytes
-that must be signed. The publishing workflow supplies the Ed25519 private key
+This creates deterministic ZIP packages, bounded PNG icon assets, and the exact
+schema-v2 `index-v1.json` bytes that must be signed. The publishing workflow supplies the Ed25519 private key
 only through the `ADDON_REPOSITORY_SIGNING_KEY_PEM` GitHub Actions secret. A
 private key must never be committed, logged, or supplied as an add-on setting.
 

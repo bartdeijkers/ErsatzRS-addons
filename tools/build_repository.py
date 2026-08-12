@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build deterministic add-on packages and an unsigned v1 repository index."""
+"""Build deterministic add-on packages and an unsigned v2 repository index."""
 
 from __future__ import annotations
 
@@ -20,8 +20,10 @@ SUPPORTED_RIDS = {"linux-x64", "linux-arm64", "linux-arm", "osx-x64", "osx-arm64
 ENTRYPOINT_KINDS = {"native", "posix_shell", "windows_batch"}
 ROOT_FIELDS = {
     "manifest_version", "id", "version", "name", "summary", "license", "source_url",
-    "host_version", "capabilities", "dependencies", "entrypoints", "permissions", "settings", "panels",
+    "host_version", "icon", "capabilities", "dependencies", "entrypoints", "permissions", "settings", "panels",
 }
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+MAX_ICON_BYTES = 2 * 1024 * 1024
 
 
 def parse_args() -> argparse.Namespace:
@@ -59,8 +61,25 @@ def validate_manifest(manifest: dict, addon_dir: pathlib.Path) -> None:
     unknown = set(manifest) - ROOT_FIELDS
     if unknown:
         raise ValueError(f"{addon_dir}: unknown manifest fields: {sorted(unknown)}")
-    if manifest.get("manifest_version") != 1:
+    if manifest.get("manifest_version") not in {1, 2}:
         raise ValueError(f"{addon_dir}: unsupported manifest version")
+    icon = manifest.get("icon")
+    if manifest.get("manifest_version") == 1 and icon is not None:
+        raise ValueError(f"{addon_dir}: icons require manifest version 2")
+    if icon is not None:
+        if set(icon) != {"path", "media_type"} or icon.get("media_type") != "png":
+            raise ValueError(f"{addon_dir}: invalid icon contract")
+        icon_path = pathlib.PurePosixPath(icon.get("path", ""))
+        source = addon_dir / icon_path
+        if (
+            not icon_path.as_posix()
+            or icon_path.is_absolute()
+            or ".." in icon_path.parts
+            or not source.is_file()
+            or source.stat().st_size > MAX_ICON_BYTES
+            or not source.read_bytes().startswith(PNG_SIGNATURE)
+        ):
+            raise ValueError(f"{addon_dir}: invalid PNG icon")
     addon_id = manifest.get("id", "")
     parts = addon_id.split(".")
     if len(parts) < 3 or any(not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?", part) for part in parts):
@@ -134,12 +153,17 @@ def write_package(root: pathlib.Path, addon_dir: pathlib.Path, destination: path
             archive.writestr(info, path.read_bytes())
 
 
-def catalog_addon(addon_dir: pathlib.Path, package_url: str, package_path: pathlib.Path) -> dict:
+def catalog_addon(
+    addon_dir: pathlib.Path,
+    package_url: str,
+    package_path: pathlib.Path,
+    icon_url: str | None,
+) -> dict:
     manifest = tomllib.loads((addon_dir / "addon.toml").read_text(encoding="utf-8"))
     validate_manifest(manifest, addon_dir)
     digest = hashlib.sha256(package_path.read_bytes()).hexdigest()
     capabilities = [item["id"] for item in manifest.get("capabilities", [])]
-    return {
+    addon = {
         "id": manifest["id"],
         "version": manifest["version"],
         "name": manifest["name"],
@@ -158,6 +182,16 @@ def catalog_addon(addon_dir: pathlib.Path, package_url: str, package_path: pathl
             }
         },
     }
+    if icon_url is not None:
+        icon_path = addon_dir / manifest["icon"]["path"]
+        icon_bytes = icon_path.read_bytes()
+        addon["icon"] = {
+            "url": icon_url,
+            "media_type": "png",
+            "size": len(icon_bytes),
+            "sha256": hashlib.sha256(icon_bytes).hexdigest(),
+        }
+    return addon
 
 
 def build(root: pathlib.Path, output: pathlib.Path, sequence: int, base_url: str, generated: dt.datetime) -> None:
@@ -170,6 +204,8 @@ def build(root: pathlib.Path, output: pathlib.Path, sequence: int, base_url: str
         shutil.rmtree(output)
     packages_dir = output / "packages"
     packages_dir.mkdir(parents=True)
+    icons_dir = output / "icons"
+    icons_dir.mkdir()
 
     addons = []
     for addon_dir in sorted((root / "addons").iterdir()):
@@ -180,10 +216,22 @@ def build(root: pathlib.Path, output: pathlib.Path, sequence: int, base_url: str
         filename = f"{manifest['id']}-{manifest['version']}.zip"
         package_path = packages_dir / filename
         write_package(root, addon_dir, package_path)
-        addons.append(catalog_addon(addon_dir, f"{base_url}/packages/{filename}", package_path))
+        icon_url = None
+        if "icon" in manifest:
+            icon_filename = f"{manifest['id']}.png"
+            shutil.copyfile(addon_dir / manifest["icon"]["path"], icons_dir / icon_filename)
+            icon_url = f"{base_url}/icons/{icon_filename}"
+        addons.append(
+            catalog_addon(
+                addon_dir,
+                f"{base_url}/packages/{filename}",
+                package_path,
+                icon_url,
+            )
+        )
 
     index = {
-        "schema_version": 1,
+        "schema_version": 2,
         "repository_id": REPOSITORY_ID,
         "repository_name": REPOSITORY_NAME,
         "sequence": sequence,

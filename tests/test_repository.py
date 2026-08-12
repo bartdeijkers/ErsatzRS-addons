@@ -26,6 +26,7 @@ class RepositoryTests(unittest.TestCase):
             first_index = pathlib.Path(first, "index-v1.json").read_bytes()
             self.assertEqual(first_index, pathlib.Path(second, "index-v1.json").read_bytes())
             index = json.loads(first_index)
+            self.assertEqual(index["schema_version"], 2)
             self.assertEqual(index["repository_id"], "org.ersatzrs.addons.official")
             self.assertEqual(len(index["addons"]), 2)
             for addon in index["addons"]:
@@ -33,6 +34,12 @@ class RepositoryTests(unittest.TestCase):
                 self.assertIn("stream", addon["summary"]["en-US"].lower())
                 self.assertIn("not for downloading", addon["summary"]["en-US"].lower())
                 self.assertEqual(addon["dependencies"], [])
+                icon = addon["icon"]
+                icon_filename = icon["url"].rsplit("/", 1)[1]
+                icon_contents = pathlib.Path(first, "icons", icon_filename).read_bytes()
+                self.assertEqual(hashlib.sha256(icon_contents).hexdigest(), icon["sha256"])
+                self.assertEqual(len(icon_contents), icon["size"])
+                self.assertEqual(icon["media_type"], "png")
                 package = addon["packages"]["any"]
                 filename = package["url"].rsplit("/", 1)[1]
                 contents = pathlib.Path(first, "packages", filename).read_bytes()
@@ -40,6 +47,7 @@ class RepositoryTests(unittest.TestCase):
                 self.assertEqual(len(contents), package["size"])
                 with zipfile.ZipFile(pathlib.Path(first, "packages", filename)) as archive:
                     self.assertIn("addon.toml", archive.namelist())
+                    self.assertIn("icon.png", archive.namelist())
                     self.assertEqual(archive.read("LICENSE"), (ROOT / "LICENSE").read_bytes())
 
     @unittest.skipUnless(pathlib.Path("/bin/sh").exists(), "POSIX shell required")

@@ -1,7 +1,7 @@
 manifest_version = 1
 id = "org.ersatzrs.addon.beeldengeluid"
-version = "0.1.0"
-license = "GPL-3.0-or-later"
+version = "0.1.1"
+license = "Zlib"
 source_url = "https://github.com/bartdeijkers/ErsatzRS-addons/tree/main/addons/org.ersatzrs.addon.beeldengeluid"
 host_version = ">=0.1.0, <0.2.0"
 
@@ -13,11 +13,11 @@ pl = "Beeld & Geluid"
 "pt-BR" = "Beeld & Geluid"
 
 [summary]
-"en-US" = "Enumerate and play programmes from the Beeld & Geluid Schatkamer."
-nl = "Toon en speel programma's uit de Schatkamer van Beeld & Geluid."
-"fr-FR" = "Répertorie et lit les programmes de la Schatkamer de Beeld & Geluid."
-pl = "Wyświetla i odtwarza programy z archiwum Schatkamer Beeld & Geluid."
-"pt-BR" = "Lista e reproduz programas da Schatkamer do Beeld & Geluid."
+"en-US" = "Stream Beeld & Geluid Schatkamer programmes to ErsatzRS for playback, not for downloading."
+nl = "Stream programma's uit de Schatkamer van Beeld & Geluid naar ErsatzRS om af te spelen, niet om te downloaden."
+"fr-FR" = "Diffuse les programmes de la Schatkamer de Beeld & Geluid vers ErsatzRS pour les lire, sans les télécharger."
+pl = "Strumieniuje programy ze Schatkamer Beeld & Geluid do ErsatzRS w celu odtwarzania, a nie pobierania."
+"pt-BR" = "Transmite programas da Schatkamer do Beeld & Geluid para o ErsatzRS reproduzir, não para baixar."
 
 [[capabilities]]
 id = "addon.check.v1"

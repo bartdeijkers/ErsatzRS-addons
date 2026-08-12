@@ -7,10 +7,14 @@ processes; packages are never loaded into the server process.
 
 The initial repository contains:
 
-- `org.ersatzrs.addon.beeldengeluid`: enumerates and plays Beeld & Geluid
+- `org.ersatzrs.addon.beeldengeluid`: enumerates and streams Beeld & Geluid
   Schatkamer programmes without Python or yt-dlp.
-- `org.ersatzrs.addon.yt-dlp`: plays a remote video through an
+- `org.ersatzrs.addon.yt-dlp`: streams a remote video through an
   operator-installed yt-dlp and the ErsatzRS-managed FFmpeg runtime.
+
+Both add-ons send video directly to ErsatzRS for immediate playback, much like
+casting a video to a Chromecast. They are streaming integrations and are not
+designed to download videos or create a permanent local video collection.
 
 Package contracts are owned by the `ersatzrs-addon-contract` crate in the
 [ErsatzRS repository](https://github.com/bartdeijkers/ErsatzRS). Each package
@@ -56,5 +60,5 @@ URLs, or local machine paths in fixtures or logs.
 
 ## License
 
-GPL-3.0-or-later. Provider names and services remain the property of their
+[Zlib](LICENSE). Provider names and services remain the property of their
 respective owners. Users are responsible for authorization and service terms.

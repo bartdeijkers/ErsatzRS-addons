@@ -29,6 +29,9 @@ class RepositoryTests(unittest.TestCase):
             self.assertEqual(index["repository_id"], "org.ersatzrs.addons.official")
             self.assertEqual(len(index["addons"]), 2)
             for addon in index["addons"]:
+                self.assertEqual(addon["license"], "Zlib")
+                self.assertIn("stream", addon["summary"]["en-US"].lower())
+                self.assertIn("not for downloading", addon["summary"]["en-US"].lower())
                 self.assertEqual(addon["dependencies"], [])
                 package = addon["packages"]["any"]
                 filename = package["url"].rsplit("/", 1)[1]
@@ -37,6 +40,7 @@ class RepositoryTests(unittest.TestCase):
                 self.assertEqual(len(contents), package["size"])
                 with zipfile.ZipFile(pathlib.Path(first, "packages", filename)) as archive:
                     self.assertIn("addon.toml", archive.namelist())
+                    self.assertEqual(archive.read("LICENSE"), (ROOT / "LICENSE").read_bytes())
 
     @unittest.skipUnless(pathlib.Path("/bin/sh").exists(), "POSIX shell required")
     def test_posix_readiness_contracts_emit_one_json_object(self) -> None:

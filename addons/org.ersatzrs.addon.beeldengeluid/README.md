@@ -5,6 +5,10 @@ episodes as MPEG-TS. Its Unix and Windows implementations perform the complete
 provider flow directly; they do not require Python, yt-dlp, browser cookies,
 or stored media URLs.
 
+Video is streamed directly through ErsatzRS for immediate playback, comparable
+to casting it to a Chromecast. The add-on does not save a permanent video file
+and is not designed for downloading or building a local video collection.
+
 Required network destinations and executables are declared in `addon.toml`.
 ErsatzRS supplies its managed FFmpeg path. The optional curl path and emergency
 Server Action ID can be configured on **Settings > Add-ons**.

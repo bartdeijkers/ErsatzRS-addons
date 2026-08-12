@@ -117,10 +117,16 @@ def validate_manifest(manifest: dict, addon_dir: pathlib.Path) -> None:
             raise ValueError(f"{addon_dir}: invalid external command")
 
 
-def write_package(addon_dir: pathlib.Path, destination: pathlib.Path) -> None:
+def write_package(root: pathlib.Path, addon_dir: pathlib.Path, destination: pathlib.Path) -> None:
     with zipfile.ZipFile(destination, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
+        license_info = zipfile.ZipInfo("LICENSE", PACKAGE_EPOCH)
+        license_info.compress_type = zipfile.ZIP_DEFLATED
+        license_info.external_attr = (0o644 & 0xFFFF) << 16
+        archive.writestr(license_info, (root / "LICENSE").read_bytes())
         for path in package_files(addon_dir):
             relative = path.relative_to(addon_dir).as_posix()
+            if relative == "LICENSE":
+                continue
             info = zipfile.ZipInfo(relative, PACKAGE_EPOCH)
             info.compress_type = zipfile.ZIP_DEFLATED
             mode = 0o755 if path.suffix == ".sh" else 0o644
@@ -173,7 +179,7 @@ def build(root: pathlib.Path, output: pathlib.Path, sequence: int, base_url: str
         validate_manifest(manifest, addon_dir)
         filename = f"{manifest['id']}-{manifest['version']}.zip"
         package_path = packages_dir / filename
-        write_package(addon_dir, package_path)
+        write_package(root, addon_dir, package_path)
         addons.append(catalog_addon(addon_dir, f"{base_url}/packages/{filename}", package_path))
 
     index = {

@@ -1,7 +1,7 @@
 # Beeld & Geluid add-on
 
-This add-on enumerates a Schatkamer series as NDJSON and streams individual
-episodes as MPEG-TS. Its Unix and Windows implementations perform the complete
+This add-on enumerates a Schatkamer series or public shared list as NDJSON and
+streams individual episodes as MPEG-TS. Its Unix and Windows implementations perform the complete
 provider flow directly; they do not require Python, yt-dlp, browser cookies,
 or stored media URLs.
 
@@ -26,6 +26,25 @@ sync:
   on_removed: trash
 create_playlist: true
 ```
+
+A public user-made list uses its shared `/lijst/<uuid>` URL. The generated
+playlist follows the user's order; duplicate programmes keep their first
+position, and programmes that Schatkamer marks unavailable are skipped:
+
+```yaml
+name: Example shared list
+url: https://schatkamer.beeldengeluid.nl/lijst/<list-uuid>
+addon: org.ersatzrs.addon.beeldengeluid
+folder: shared-list
+sync:
+  interval: 24h
+  order: upstream
+  on_removed: trash
+create_playlist: true
+```
+
+Only public shared lists are supported. Private lists that require a signed-in
+browser session are rejected without replacing the last successful sync.
 
 An individual episode definition uses the same identity:
 

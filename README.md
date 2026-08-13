@@ -7,8 +7,9 @@ processes; packages are never loaded into the server process.
 
 The initial repository contains:
 
-- `org.ersatzrs.addon.beeldengeluid`: enumerates and streams Beeld & Geluid
-  Schatkamer programmes without Python or yt-dlp.
+- `org.ersatzrs.addon.beeldengeluid`: enumerates Schatkamer series and public
+  user-made lists and streams their Beeld & Geluid programmes without Python
+  or yt-dlp.
 - `org.ersatzrs.addon.yt-dlp`: streams a remote video through an
   operator-installed yt-dlp and the ErsatzRS-managed FFmpeg runtime.
 

@@ -150,7 +150,10 @@ def write_package(root: pathlib.Path, addon_dir: pathlib.Path, destination: path
             info.compress_type = zipfile.ZIP_DEFLATED
             mode = 0o755 if path.suffix == ".sh" else 0o644
             info.external_attr = (mode & 0xFFFF) << 16
-            archive.writestr(info, path.read_bytes())
+            contents = path.read_bytes()
+            if path.suffix.lower() == ".bat":
+                contents = contents.replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")
+            archive.writestr(info, contents)
 
 
 def catalog_addon(

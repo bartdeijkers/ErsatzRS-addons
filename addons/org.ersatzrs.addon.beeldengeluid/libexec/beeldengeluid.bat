@@ -4,22 +4,26 @@ setlocal DisableDelayedExpansion
 rem Enumerate or stream Beeld & Geluid "Schatkamer" media for ErsatzRS.
 
 if "%~1"=="" goto :usage
-if /i "%~1"=="list" (
-    if "%~2"=="" goto :usage
-    if not "%~3"=="" goto :usage
-    set "PLAYLIST_URL=%~2"
-    goto :list_url_valid
-)
-if /i "%~1"=="play" (
-    if "%~2"=="" goto :usage
-    if not "%~4"=="" goto :usage
-    set "EPISODE_URL=%~2"
-    set "SEEK_POSITION=%~3"
-) else (
-    if not "%~3"=="" goto :usage
-    set "EPISODE_URL=%~1"
-    set "SEEK_POSITION=%~2"
-)
+if /i "%~1"=="list" goto :list_args
+if /i "%~1"=="play" goto :play_args
+if not "%~3"=="" goto :usage
+set "EPISODE_URL=%~1"
+set "SEEK_POSITION=%~2"
+goto :play_args_ready
+
+:list_args
+if "%~2"=="" goto :usage
+if not "%~3"=="" goto :usage
+set "PLAYLIST_URL=%~2"
+goto :list_url_valid
+
+:play_args
+if "%~2"=="" goto :usage
+if not "%~4"=="" goto :usage
+set "EPISODE_URL=%~2"
+set "SEEK_POSITION=%~3"
+
+:play_args_ready
 
 if not defined SEEK_POSITION set "SEEK_POSITION=0"
 rem Keep definitions backward compatible with builds that do not substitute
@@ -36,73 +40,8 @@ call :require_program "%CURL_BIN%" curl
 if errorlevel 1 exit /b 69
 call :require_program "powershell.exe" PowerShell
 if errorlevel 1 exit /b 69
-powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ^
-    "$ErrorActionPreference = 'Stop';" ^
-    "try {" ^
-    "  $uri = [Uri]$env:PLAYLIST_URL;" ^
-    "  if ($uri.Scheme -notin @('http', 'https') -or $uri.Host -ne 'schatkamer.beeldengeluid.nl' -or $uri.AbsolutePath -notmatch '^/serie/\d+/[^/]+/?$') { throw 'unsupported series URL' };" ^
-    "  $base = $uri.GetLeftPart([UriPartial]::Path).TrimEnd('/');" ^
-    "  $work = Join-Path $env:TEMP ('ersatzrs-beeldengeluid-list-' + [Guid]::NewGuid().ToString('N'));" ^
-    "  [IO.Directory]::CreateDirectory($work) ^| Out-Null;" ^
-    "  try {" ^
-    "    $pageFile = Join-Path $work 'page.html'; $episodeFile = Join-Path $work 'episode.html';" ^
-    "    function JsonSlice([string]$html, [string]$start, [string]$end) {" ^
-    "      $pattern = '\\\x22' + [regex]::Escape($start) + '\\\x22:(.*?),\\\x22' + [regex]::Escape($end) + '\\\x22:';" ^
-    "      $matches = [regex]::Matches($html, $pattern, 'Singleline'); if (-not $matches.Count) { return $null }; return $matches[$matches.Count - 1].Groups[1].Value" ^
-    "    };" ^
-    "    function JsonObjectNames([string]$html, [string]$start, [string]$end) {" ^
-    "      $slice = JsonSlice $html $start $end; if (-not $slice) { return @() }; return @([regex]::Matches($slice, '\\\x22name\\\x22:\\\x22([^\\\x22]*)') ^| ForEach-Object { [Net.WebUtility]::HtmlDecode($_.Groups[1].Value) } ^| Select-Object -Unique)" ^
-    "    };" ^
-    "    function JsonArrayValues([string]$html, [string]$start, [string]$end) {" ^
-    "      $slice = JsonSlice $html $start $end; if (-not $slice) { return @() }; return @([regex]::Matches($slice, '\\\x22([^\\\x22]*)\\\x22') ^| ForEach-Object { [Net.WebUtility]::HtmlDecode($_.Groups[1].Value) } ^| Select-Object -Unique)" ^
-    "    };" ^
-    "    $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase);" ^
-    "    $paths = [Collections.Generic.List[string]]::new();" ^
-    "    for ($page = 1; $page -le 100; $page++) {" ^
-    "      ^& $env:CURL_BIN --fail --silent --show-error --location --output $pageFile ($base + '?pagina=' + $page);" ^
-    "      if ($LASTEXITCODE -ne 0) { throw 'series page request failed' };" ^
-    "      $html = [IO.File]::ReadAllText($pageFile); $added = 0;" ^
-    "      foreach ($match in [regex]::Matches($html, 'href=\x22(/serie/\d+/[^\x22/]+/aflevering/\d+)\x22')) {" ^
-    "        $path = $match.Groups[1].Value; if ($seen.Add($path)) { $paths.Add($path); $added++ }" ^
-    "      };" ^
-    "      if ($added -eq 0) { break }" ^
-    "    };" ^
-    "    if ($paths.Count -eq 0) { throw 'series has no playable episodes' };" ^
-    "    foreach ($path in $paths) {" ^
-    "      $episodeUrl = 'https://schatkamer.beeldengeluid.nl' + $path;" ^
-    "      ^& $env:CURL_BIN --fail --silent --show-error --location --output $episodeFile $episodeUrl;" ^
-    "      if ($LASTEXITCODE -ne 0) { throw 'episode metadata request failed' };" ^
-    "      $html = [IO.File]::ReadAllText($episodeFile);" ^
-    "      $series = [regex]::Match($html, '<h1[^>]*>([^<]*)').Groups[1].Value;" ^
-    "      $title = [regex]::Match($html, '<h3[^>]*>([^<]*)').Groups[1].Value;" ^
-    "      if (-not $title) { $title = $path.Substring($path.LastIndexOf('/') + 1) };" ^
-    "      $series = [Net.WebUtility]::HtmlDecode($series); $title = [Net.WebUtility]::HtmlDecode($title);" ^
-    "      if ($series) { $title = $series + ' - ' + $title };" ^
-    "      $duration = [regex]::Match($html, '\\\x22durationNumber\\\x22:(\d+)');" ^
-    "      $publishedMatches = [regex]::Matches($html, '\\\x22publishedAtISO\\\x22:\\\x22([^\\\x22]+)');" ^
-    "      $published = if ($publishedMatches.Count) { $publishedMatches[$publishedMatches.Count - 1].Groups[1].Value } else { $null };" ^
-    "      $descriptionRaw = JsonSlice $html 'description' 'disclaimer';" ^
-    "      $plot = $null; if ($descriptionRaw -and $descriptionRaw.Length -ge 4) { $jsonDescription = $descriptionRaw.Remove($descriptionRaw.Length - 2, 1).Remove(0, 1).Replace('\\', '\'); $plot = $jsonDescription ^| ConvertFrom-Json };" ^
-    "      $ageMatches = [regex]::Matches($html, '\\\x22ageRating\\\x22:\\\x22([^\\\x22]*)');" ^
-    "      $age = if ($ageMatches.Count) { [Net.WebUtility]::HtmlDecode($ageMatches[$ageMatches.Count - 1].Groups[1].Value) } else { $null };" ^
-    "      $rating = switch -Regex ($age) { '^Leeftijdsadvies onbekend$' { 'nl:unknown'; break }; '^Alle leeftijden$' { 'nl:AL'; break }; 'onder de (\d+) jaar' { 'nl:' + $Matches[1]; break }; default { $age } };" ^
-    "      $collectionMatch = [regex]::Match($html, 'href=\x22/zoeken[?]collectie=[^\x22]*\x22[^>]*>([^<]*)');" ^
-    "      $row = [ordered]@{ id = $path.Substring($path.LastIndexOf('/') + 1); url = $episodeUrl; title = $title };" ^
-    "      if ($duration.Success) { $row.duration_seconds = [int64]$duration.Groups[1].Value };" ^
-    "      if ($plot) { $row.plot = $plot };" ^
-    "      if ($published) { $row.release_date = $published; $row.year = [int]$published.Substring(0, 4) };" ^
-    "      if ($rating) { $row.content_rating = $rating };" ^
-    "      $row.genres = @(JsonArrayValues $html 'genres' 'subjects'); $row.tags = @(JsonArrayValues $html 'subjects' 'collection');" ^
-    "      if ($collectionMatch.Success) { $row.collection = [Net.WebUtility]::HtmlDecode($collectionMatch.Groups[1].Value) };" ^
-    "      $people = @(); foreach ($triple in @(@('presenter','presenters','actors'), @('actor','actors','guests'), @('guest','guests','directors'), @('director','directors','performers'), @('performer','performers','others'), @('person','others','productionCompanies'))) { foreach ($person in @(JsonObjectNames $html $triple[1] $triple[2])) { $people += [ordered]@{ name = $person; role = $triple[0] } } };" ^
-    "      if ($people.Count) { $row.people = $people };" ^
-    "      $producers = @(JsonArrayValues $html 'productionCompanies' 'genres'); if ($producers.Count) { $row.producers = $producers };" ^
-    "      $originalBroadcasters = @(JsonObjectNames $html 'originalBroadcasters' 'broadcaster'); if ($originalBroadcasters.Count) { $row.original_broadcasters = $originalBroadcasters };" ^
-    "      $broadcasters = @(JsonObjectNames $html 'broadcasters' 'url'); if ($broadcasters.Count) { $row.broadcasters = $broadcasters };" ^
-    "      $row.is_live = $false; [Console]::Out.WriteLine(($row ^| ConvertTo-Json -Depth 4 -Compress))" ^
-    "    }" ^
-    "  } finally { if (Test-Path -LiteralPath $work) { Remove-Item -LiteralPath $work -Recurse -Force } }" ^
-    "} catch { [Console]::Error.WriteLine('beeldengeluid.bat: playlist enumeration failed'); exit 1 }"
+powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass ^
+    -File "%~dp0beeldengeluid-list.ps1"
 if errorlevel 1 exit /b 1
 exit /b 0
 
@@ -280,7 +219,7 @@ if not errorlevel 1 exit /b 0
 exit /b 1
 
 :usage
->&2 echo Usage: beeldengeluid.bat list ^<Schatkamer series URL^>
+>&2 echo Usage: beeldengeluid.bat list ^<Schatkamer series or shared-list URL^>
 >&2 echo        beeldengeluid.bat play ^<Schatkamer episode URL^> [seek timestamp]
 >&2 echo        beeldengeluid.bat ^<Schatkamer episode URL^> [seek timestamp]
 exit /b 64

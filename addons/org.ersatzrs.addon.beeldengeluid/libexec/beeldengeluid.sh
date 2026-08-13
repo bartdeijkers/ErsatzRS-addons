@@ -6,7 +6,7 @@ set -eu
 set -f
 
 usage() {
-    echo "Usage: beeldengeluid.sh list <Schatkamer series URL>" >&2
+    echo "Usage: beeldengeluid.sh list <Schatkamer series or shared-list URL>" >&2
     echo "       beeldengeluid.sh play <Schatkamer episode URL> [seek timestamp]" >&2
     echo "       beeldengeluid.sh <Schatkamer episode URL> [seek timestamp]" >&2
 }
@@ -96,40 +96,8 @@ write_json_array() {
     printf ']'
 }
 
-list_series() {
-    [ "$#" -eq 1 ] || { usage; exit 64; }
-    series_url=$1
-    case "$series_url" in
-        https://schatkamer.beeldengeluid.nl/serie/*/* | \
-            http://schatkamer.beeldengeluid.nl/serie/*/*)
-            ;;
-        *)
-            fail "unsupported Schatkamer series URL" 64
-            ;;
-    esac
-    case "$series_url" in
-        */aflevering/*) fail "list requires a Schatkamer series URL" 64 ;;
-    esac
-
-    curl_bin=${CURL_BIN:-curl}
-    find_program "$curl_bin" "curl"
-    find_program grep "grep"
-    find_program sed "sed"
-    find_program awk "awk"
-    find_program mktemp "mktemp"
-
-    series_base=${series_url%%\?*}
-    series_base=${series_base%%\#*}
-    series_base=${series_base%/}
-    list_work_dir=$(mktemp -d "${TMPDIR:-/tmp}/ersatzrs-beeldengeluid-list.XXXXXX") \
-        || fail "unable to create a temporary directory"
-    list_cleanup() {
-        rm -f "$list_work_dir"/*
-        rmdir "$list_work_dir" 2>/dev/null || true
-    }
-    trap list_cleanup EXIT HUP INT TERM
-    : >"$list_work_dir/seen.txt"
-
+discover_series_paths() {
+    series_base=$1
     page_number=1
     while [ "$page_number" -le 100 ]; do
         page_url="$series_base?pagina=$page_number"
@@ -150,9 +118,120 @@ list_series() {
         [ -s "$list_work_dir/new-links.txt" ] || break
         page_number=$((page_number + 1))
     done
-
     [ -s "$list_work_dir/seen.txt" ] \
         || fail "the Schatkamer series did not contain playable episodes"
+}
+
+discover_shared_list_paths() {
+    shared_list_url=$1
+    "$curl_bin" --fail --silent --show-error --location \
+        --output "$list_work_dir/page.html" "$shared_list_url" \
+        || fail "the Schatkamer shared-list page request failed"
+    sed 's/\\"/"/g' "$list_work_dir/page.html" \
+        >"$list_work_dir/normalized-list.html"
+    grep -Fq '"description":"Gedeelde lijst"' \
+        "$list_work_dir/normalized-list.html" \
+        || fail "the Schatkamer shared list is unavailable or private"
+
+    awk '
+        BEGIN {
+            marker = "\"url\":\"https://schatkamer.beeldengeluid.nl/serie/"
+            playable_marker = "\"isPlayable\":"
+        }
+        {
+            rest = $0
+            while ((start = index(rest, marker)) > 0) {
+                candidate = substr(rest, start + length(marker))
+                finish = index(candidate, "\"")
+                if (finish == 0) break
+                suffix = substr(candidate, 1, finish - 1)
+                after_url = substr(candidate, finish + 1)
+                playable_at = index(after_url, playable_marker)
+                next_url = index(after_url, marker)
+                if (playable_at > 0 && (next_url == 0 || playable_at < next_url)) {
+                    state = substr(after_url, playable_at + length(playable_marker), 5)
+                    if (state ~ /^true/) print "playable|/serie/" suffix
+                    else if (state ~ /^false/) print "unavailable|/serie/" suffix
+                }
+                rest = after_url
+            }
+        }
+    ' "$list_work_dir/normalized-list.html" >"$list_work_dir/list-entries.txt"
+
+    unavailable_count=0
+    while IFS='|' read -r state episode_path; do
+        [ -n "$episode_path" ] || continue
+        if ! printf '%s\n' "$episode_path" \
+            | LC_ALL=C grep -Eq '^/serie/[0-9]+/[^/]+/aflevering/[0-9]+$'; then
+            continue
+        fi
+        if grep -Fqx "$episode_path" "$list_work_dir/seen-all.txt"; then
+            continue
+        fi
+        printf '%s\n' "$episode_path" >>"$list_work_dir/seen-all.txt"
+        if [ "$state" = playable ]; then
+            printf '%s\n' "$episode_path" >>"$list_work_dir/seen.txt"
+        else
+            unavailable_count=$((unavailable_count + 1))
+        fi
+    done <"$list_work_dir/list-entries.txt"
+
+    [ -s "$list_work_dir/seen.txt" ] \
+        || fail "the Schatkamer shared list did not contain playable episodes"
+    if [ "$unavailable_count" -gt 0 ]; then
+        printf 'beeldengeluid.sh: skipped %s unavailable Schatkamer shared-list item(s)\n' \
+            "$unavailable_count" >&2
+    fi
+}
+
+list_playlist() {
+    [ "$#" -eq 1 ] || { usage; exit 64; }
+    playlist_url=${1%%\?*}
+    playlist_url=${playlist_url%%\#*}
+    playlist_url=${playlist_url%/}
+    case "$playlist_url" in
+        https://schatkamer.beeldengeluid.nl/serie/*/* | \
+            http://schatkamer.beeldengeluid.nl/serie/*/*)
+            source_kind=series
+            ;;
+        https://schatkamer.beeldengeluid.nl/lijst/* | \
+            http://schatkamer.beeldengeluid.nl/lijst/*)
+            list_id=${playlist_url##*/}
+            if ! printf '%s\n' "$list_id" \
+                | LC_ALL=C grep -Eq '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'; then
+                fail "the Schatkamer shared-list ID must be a UUID" 64
+            fi
+            source_kind=shared_list
+            ;;
+        *)
+            fail "unsupported Schatkamer playlist URL" 64
+            ;;
+    esac
+    case "$playlist_url" in
+        */aflevering/*) fail "list requires a Schatkamer series URL" 64 ;;
+    esac
+
+    curl_bin=${CURL_BIN:-curl}
+    find_program "$curl_bin" "curl"
+    find_program grep "grep"
+    find_program sed "sed"
+    find_program awk "awk"
+    find_program mktemp "mktemp"
+
+    list_work_dir=$(mktemp -d "${TMPDIR:-/tmp}/ersatzrs-beeldengeluid-list.XXXXXX") \
+        || fail "unable to create a temporary directory"
+    list_cleanup() {
+        rm -f "$list_work_dir"/*
+        rmdir "$list_work_dir" 2>/dev/null || true
+    }
+    trap list_cleanup EXIT HUP INT TERM
+    : >"$list_work_dir/seen.txt"
+    : >"$list_work_dir/seen-all.txt"
+    if [ "$source_kind" = series ]; then
+        discover_series_paths "$playlist_url"
+    else
+        discover_shared_list_paths "$playlist_url"
+    fi
     while IFS= read -r episode_path; do
         episode_id=${episode_path##*/}
         episode_url="https://schatkamer.beeldengeluid.nl$episode_path"
@@ -312,7 +391,7 @@ decode_cloudfront_value() {
 
 if [ "${1:-}" = "list" ]; then
     shift
-    list_series "$@"
+    list_playlist "$@"
 fi
 if [ "${1:-}" = "play" ]; then
     shift

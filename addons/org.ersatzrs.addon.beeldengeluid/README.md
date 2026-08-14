@@ -7,9 +7,8 @@ they do not require yt-dlp, browser cookies, or stored media URLs. The generic
 media-list projection uses Python to map those programme records onto
 `media-list.list.v1`.
 
-Video is streamed directly through ErsatzRS for immediate playback, comparable
-to casting it to a Chromecast. The add-on does not save a permanent video file
-and is not designed for downloading or building a local video collection.
+Video is streamed straight through ErsatzRS for immediate playback; no
+permanent file is written.
 
 Required network destinations and executables are declared in `addon.toml`.
 ErsatzRS supplies its managed FFmpeg path. The optional curl path and emergency

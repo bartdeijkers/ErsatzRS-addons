@@ -1,6 +1,6 @@
 manifest_version = 2
 id = "org.ersatzrs.addon.yt-dlp"
-version = "0.1.1"
+version = "0.1.2"
 license = "Zlib"
 source_url = "https://github.com/bartdeijkers/ErsatzRS-addons/tree/main/addons/org.ersatzrs.addon.yt-dlp"
 host_version = ">=0.1.0, <0.2.0"
@@ -17,11 +17,11 @@ pl = "Zdalne strumienie yt-dlp"
 "pt-BR" = "Streams remotos yt-dlp"
 
 [summary]
-"en-US" = "Stream remote videos to ErsatzRS for playback through yt-dlp, not for downloading."
-nl = "Stream video's via yt-dlp naar ErsatzRS om af te spelen, niet om te downloaden."
-"fr-FR" = "Diffuse des vidéos vers ErsatzRS avec yt-dlp pour les lire, sans les télécharger."
-pl = "Strumieniuje zdalne filmy przez yt-dlp do ErsatzRS w celu odtwarzania, a nie pobierania."
-"pt-BR" = "Transmite vídeos remotos via yt-dlp para o ErsatzRS reproduzir, não para baixar."
+"en-US" = "Stream remote videos to ErsatzRS through an operator-installed yt-dlp."
+nl = "Stream externe video's via een zelf geïnstalleerde yt-dlp naar ErsatzRS."
+"fr-FR" = "Diffuse des vidéos distantes vers ErsatzRS via un yt-dlp installé par l'opérateur."
+pl = "Strumieniuje zdalne filmy do ErsatzRS przez zainstalowany samodzielnie yt-dlp."
+"pt-BR" = "Transmite vídeos remotos para o ErsatzRS por meio de um yt-dlp instalado pelo operador."
 
 [[capabilities]]
 id = "addon.check.v1"

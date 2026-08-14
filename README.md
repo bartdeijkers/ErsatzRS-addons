@@ -16,9 +16,8 @@ The repository contains:
   provider-neutral media-list contract, with its client ID resolved only from
   an environment or file secret reference.
 
-The two streaming add-ons send video directly to ErsatzRS for immediate playback, much like
-casting a video to a Chromecast. They are streaming integrations and are not
-designed to download videos or create a permanent local video collection.
+The two streaming add-ons send video straight to ErsatzRS for immediate
+playback; no permanent file is written.
 
 Package contracts are owned by the `ersatzrs-addon-contract` crate in the
 [ErsatzRS repository](https://github.com/bartdeijkers/ErsatzRS). Each package

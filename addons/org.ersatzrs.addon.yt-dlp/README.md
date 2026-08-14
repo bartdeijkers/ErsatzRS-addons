@@ -6,9 +6,8 @@ operator-installed yt-dlp. Always download or update to the
 before configuring the add-on. ErsatzRS supplies its managed FFmpeg runtime;
 yt-dlp is deliberately not bundled or updated automatically by the add-on.
 
-Video is streamed directly through ErsatzRS for immediate playback, comparable
-to casting it to a Chromecast. The add-on does not save a permanent video file
-and is not designed for downloading or building a local video collection.
+Video is streamed straight through ErsatzRS for immediate playback; no
+permanent file is written.
 
 Configure the yt-dlp executable under **Settings > Add-ons**, run **Check**,
 then enable the add-on. A Remote Stream definition selects it by identity:

@@ -127,7 +127,6 @@ cp "$source_file" "$output"
                 self.assertEqual(addon["license"], "Zlib")
                 if addon["id"] != "org.ersatzrs.addon.trakt":
                     self.assertIn("stream", addon["summary"]["en-US"].lower())
-                    self.assertIn("not for downloading", addon["summary"]["en-US"].lower())
                 self.assertEqual(addon["dependencies"], [])
                 if "icon" in addon:
                     icon = addon["icon"]

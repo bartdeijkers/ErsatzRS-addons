@@ -216,6 +216,11 @@ discover_shared_list_paths() {
 list_playlist() {
     [ "$#" -eq 1 ] || { usage; exit 64; }
     playlist_url=${1%%\#*}
+    output_mode=${BEELDENGELUID_OUTPUT:-remote-stream}
+    case "$output_mode" in
+        remote-stream | media-list) ;;
+        *) fail "unsupported list output contract" 64 ;;
+    esac
     case "$playlist_url" in
         https://schatkamer.beeldengeluid.nl/zoeken\?* | \
             http://schatkamer.beeldengeluid.nl/zoeken\?*)
@@ -268,6 +273,14 @@ list_playlist() {
         discover_search_paths "$playlist_url"
     else
         discover_shared_list_paths "$playlist_url"
+    fi
+    rank=0
+    if [ "$output_mode" = media-list ]; then
+        provider_id=${playlist_url#*://schatkamer.beeldengeluid.nl/}
+        provider_id=$(printf '%s' "$provider_id" | json_escape)
+        printf '%s\n' \
+            "{\"record_type\":\"list\",\"provider_id\":\"$provider_id\",\"name\":\"Beeld & Geluid Schatkamer\",\"description\":\"Programmes selected by the supplied Schatkamer link.\"}" \
+            >"$list_work_dir/media-list.ndjson"
     fi
     while IFS= read -r episode_path; do
         episode_id=${episode_path##*/}
@@ -350,6 +363,17 @@ list_playlist() {
         json_object_names broadcasters url \
             "$list_work_dir/episode.html" >"$list_work_dir/broadcasters.txt" || true
 
+        if [ "$output_mode" = media-list ]; then
+            printf '{"record_type":"item","provider_id":"episode:%s","rank":%s,"display_title":"%s","title":"%s","kind":"episode","guids":[]' \
+                "$episode_id" "$rank" "$title" "$title" \
+                >>"$list_work_dir/media-list.ndjson"
+            [ -z "$year" ] \
+                || printf ',"year":%s' "$year" >>"$list_work_dir/media-list.ndjson"
+            printf '}\n' >>"$list_work_dir/media-list.ndjson"
+            rank=$((rank + 1))
+            continue
+        fi
+
         printf '{"id":"%s","url":"%s","title":"%s"' \
             "$episode_id" "$episode_url" "$title"
         [ -z "$duration_seconds" ] \
@@ -378,6 +402,11 @@ list_playlist() {
         write_json_array broadcasters "$list_work_dir/broadcasters.txt"
         printf ',"is_live":false}\n'
     done <"$list_work_dir/seen.txt"
+    if [ "$output_mode" = media-list ]; then
+        while IFS= read -r record; do
+            printf '%s\n' "$record"
+        done <"$list_work_dir/media-list.ndjson"
+    fi
     exit 0
 }
 

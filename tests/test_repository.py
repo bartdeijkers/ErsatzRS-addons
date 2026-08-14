@@ -161,6 +161,35 @@ cp "$source_file" "$output"
             self.assertEqual(set(trakt["packages"]), BUILD_REPOSITORY.SUPPORTED_RIDS - {"any"})
             self.assertEqual(trakt["permissions"]["external_commands"], [])
 
+            beeldengeluid = next(
+                addon
+                for addon in index["addons"]
+                if addon["id"] == "org.ersatzrs.addon.beeldengeluid"
+            )
+            self.assertNotIn("python", beeldengeluid["permissions"]["external_commands"])
+            self.assertNotIn("python3", beeldengeluid["permissions"]["external_commands"])
+            for package in beeldengeluid["packages"].values():
+                filename = package["url"].rsplit("/", 1)[1]
+                with zipfile.ZipFile(pathlib.Path(first, "packages", filename)) as archive:
+                    self.assertNotIn("libexec/beeldengeluid-media-list.py", archive.namelist())
+
+    def test_beeldengeluid_manifest_has_no_python_runtime(self) -> None:
+        manifest = BUILD_REPOSITORY.tomllib.loads(
+            (
+                ROOT
+                / "addons"
+                / "org.ersatzrs.addon.beeldengeluid"
+                / "addon.toml"
+            ).read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            [setting["key"] for setting in manifest["settings"]],
+            ["CURL_BIN", "ACTION_ID"],
+        )
+        self.assertFalse(
+            {"python", "python3"} & set(manifest["permissions"]["external_commands"])
+        )
+
     def test_trakt_manifest_suggests_only_a_secret_reference_name(self) -> None:
         manifest = BUILD_REPOSITORY.tomllib.loads(
             (ROOT / "addons" / "org.ersatzrs.addon.trakt" / "addon.toml").read_text(
@@ -184,10 +213,7 @@ cp "$source_file" "$output"
         for addon_id, extra in [
             (
                 "org.ersatzrs.addon.beeldengeluid",
-                {
-                    "ERSATZRS_ADDON_SETTING_CURL_BIN": "/bin/true",
-                    "ERSATZRS_ADDON_SETTING_PYTHON_BIN": "/definitely/missing-python",
-                },
+                {"ERSATZRS_ADDON_SETTING_CURL_BIN": "/bin/true"},
             ),
             ("org.ersatzrs.addon.yt-dlp", {"ERSATZRS_ADDON_SETTING_YT_DLP_BIN": "/bin/true"}),
         ]:
@@ -279,10 +305,19 @@ cp "$source_file" "$output"
         self.assertEqual(result.returncode, 0, result.stderr)
         rows = [json.loads(line) for line in result.stdout.splitlines()]
         self.assertEqual(rows[0]["record_type"], "list")
+        self.assertEqual(rows[0]["provider_id"], "serie/20/fixture")
         self.assertEqual([row["provider_id"] for row in rows[1:]], ["episode:201", "episode:203"])
+        self.assertEqual([row["rank"] for row in rows[1:]], [0, 1])
+        self.assertEqual([row["year"] for row in rows[1:]], [1993, 1993])
         self.assertTrue(all(row["kind"] == "episode" for row in rows[1:]))
 
     def test_windows_beeldengeluid_declares_shared_list_contract(self) -> None:
+        entrypoint_batch_source = (
+            ROOT
+            / "addons"
+            / "org.ersatzrs.addon.beeldengeluid"
+            / "addon.bat"
+        ).read_text(encoding="utf-8")
         batch_source = (
             ROOT
             / "addons"
@@ -297,8 +332,12 @@ cp "$source_file" "$output"
             / "libexec"
             / "beeldengeluid-list.ps1"
         ).read_text(encoding="utf-8")
+        self.assertIn('set "BEELDENGELUID_OUTPUT=media-list"', entrypoint_batch_source)
         self.assertIn('beeldengeluid-list.ps1"', batch_source)
         self.assertIn("$isSharedList", source)
+        self.assertIn("$mediaListMode", source)
+        self.assertIn("record_type = 'list'", source)
+        self.assertIn("record_type = 'item'", source)
         self.assertIn("Gedeelde lijst", source)
         self.assertIn("isPlayable", source)
         self.assertIn("$seen.Add($path)", source)

@@ -48,6 +48,17 @@ try {
     }
 
     $base = $uri.GetLeftPart([UriPartial]::Path).TrimEnd('/')
+    $mediaListMode = $env:BEELDENGELUID_OUTPUT -eq 'media-list'
+    $mediaListRows = [Collections.Generic.List[string]]::new()
+    if ($mediaListMode) {
+        $listRecord = [ordered]@{
+            record_type = 'list'
+            provider_id = $uri.AbsolutePath.Trim('/') + $uri.Query
+            name = 'Beeld & Geluid Schatkamer'
+            description = 'Programmes selected by the supplied Schatkamer link.'
+        }
+        $mediaListRows.Add(($listRecord | ConvertTo-Json -Compress))
+    }
     $work = Join-Path $env:TEMP ('ersatzrs-beeldengeluid-list-' + [Guid]::NewGuid().ToString('N'))
     [IO.Directory]::CreateDirectory($work) | Out-Null
     try {
@@ -101,6 +112,7 @@ try {
         }
 
         if ($paths.Count -eq 0) { throw 'playlist has no playable episodes' }
+        $rank = 0
         foreach ($path in $paths) {
             $episodeUrl = 'https://schatkamer.beeldengeluid.nl' + $path
             Invoke-CurlToFile $episodeUrl $episodeFile 'episode metadata request failed'
@@ -193,7 +205,27 @@ try {
             $broadcasters = @(JsonObjectNames $programHtml 'broadcasters' 'url')
             if ($broadcasters.Count) { $row.broadcasters = $broadcasters }
             $row.is_live = $false
-            [Console]::Out.WriteLine(($row | ConvertTo-Json -Depth 4 -Compress))
+            if ($mediaListMode) {
+                $item = [ordered]@{
+                    record_type = 'item'
+                    provider_id = 'episode:' + $episodeId
+                    rank = $rank
+                    display_title = $title
+                    title = $title
+                    kind = 'episode'
+                    guids = @()
+                }
+                if ($published) { $item.year = [int]$published.Substring(0, 4) }
+                $mediaListRows.Add(($item | ConvertTo-Json -Depth 2 -Compress))
+                $rank++
+            } else {
+                [Console]::Out.WriteLine(($row | ConvertTo-Json -Depth 4 -Compress))
+            }
+        }
+        if ($mediaListMode) {
+            foreach ($record in $mediaListRows) {
+                [Console]::Out.WriteLine($record)
+            }
         }
     } finally {
         if (Test-Path -LiteralPath $work) {

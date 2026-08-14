@@ -1,6 +1,6 @@
 manifest_version = 2
 id = "org.ersatzrs.addon.beeldengeluid"
-version = "0.2.1"
+version = "0.2.2"
 license = "Zlib"
 source_url = "https://github.com/bartdeijkers/ErsatzRS-addons/tree/main/addons/org.ersatzrs.addon.beeldengeluid"
 host_version = ">=0.1.0, <0.2.0"
@@ -63,7 +63,7 @@ kind = "windows_batch"
 network_hosts = ["schatkamer.beeldengeluid.nl", "sk-video.cdn.beeldengeluid.nl"]
 media_read = false
 managed_ffmpeg = true
-external_commands = ["curl", "awk", "grep", "dd", "sed", "mktemp", "powershell.exe", "python3", "python"]
+external_commands = ["curl", "awk", "grep", "dd", "sed", "mktemp", "powershell.exe"]
 
 [[settings]]
 key = "CURL_BIN"
@@ -77,12 +77,5 @@ options = []
 key = "ACTION_ID"
 label = { "en-US" = "Emergency Server Action ID", nl = "Server Action-ID voor noodgevallen", "fr-FR" = "ID Server Action de secours", pl = "Awaryjny identyfikator Server Action", "pt-BR" = "ID de emergência do Server Action" }
 kind = "string"
-required = false
-options = []
-
-[[settings]]
-key = "PYTHON_BIN"
-label = { "en-US" = "Python executable", nl = "Python-programma", "fr-FR" = "Exécutable Python", pl = "Program Python", "pt-BR" = "Executável Python" }
-kind = "executable"
 required = false
 options = []

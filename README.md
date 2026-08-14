@@ -9,7 +9,7 @@ The repository contains:
 
 - `org.ersatzrs.addon.beeldengeluid`: enumerates Schatkamer series, public
   user-made lists, and saved searches, and streams their programmes. Its Remote
-  Stream path does not require Python or yt-dlp.
+  Stream and media-list paths do not require Python or yt-dlp.
 - `org.ersatzrs.addon.yt-dlp`: streams a remote video through an
   operator-installed yt-dlp and the ErsatzRS-managed FFmpeg runtime.
 - `org.ersatzrs.addon.trakt`: imports public Trakt lists through the
@@ -21,10 +21,10 @@ playback; no permanent file is written.
 
 Package contracts are owned by the `ersatzrs-addon-contract` crate in the
 [ErsatzRS repository](https://github.com/bartdeijkers/ErsatzRS). Each package
-keeps its runtime self-contained below `addons/<id>/`. Repository tooling and
-the Beeld & Geluid provider-list adapter use Python; the Trakt adapter is a
-native Rust executable, and the Beeld & Geluid Remote Stream enumeration and
-playback path remains implemented directly for POSIX and Windows.
+keeps its runtime self-contained below `addons/<id>/`. Python is used only by
+repository build and test tooling; it is not an add-on runtime dependency. The
+Trakt adapter is a native Rust executable, while Beeld & Geluid enumeration and
+playback remain implemented directly for POSIX and Windows.
 
 ## Build the unsigned repository
 

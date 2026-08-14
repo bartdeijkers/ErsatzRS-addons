@@ -6,7 +6,6 @@ set -f
 operation=${1:-}
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 curl_bin=${ERSATZRS_ADDON_SETTING_CURL_BIN:-curl}
-python_bin=${ERSATZRS_ADDON_SETTING_PYTHON_BIN:-python3}
 export CURL_BIN=$curl_bin
 if [ -n "${ERSATZRS_ADDON_SETTING_ACTION_ID:-}" ]; then
     export BEELDENGELUID_ACTION_ID=$ERSATZRS_ADDON_SETTING_ACTION_ID
@@ -32,7 +31,8 @@ case "$operation" in
         ;;
     list)
         if [ -n "${ERSATZRS_MEDIA_LIST_URL:-}" ]; then
-            exec "$python_bin" "$script_dir/libexec/beeldengeluid-media-list.py"
+            export BEELDENGELUID_OUTPUT=media-list
+            exec /bin/sh "$script_dir/libexec/beeldengeluid.sh" list "$ERSATZRS_MEDIA_LIST_URL"
         fi
         : "${ERSATZRS_REMOTE_STREAM_PLAYLIST_URL:?playlist URL is required}"
         exec /bin/sh "$script_dir/libexec/beeldengeluid.sh" list "$ERSATZRS_REMOTE_STREAM_PLAYLIST_URL"

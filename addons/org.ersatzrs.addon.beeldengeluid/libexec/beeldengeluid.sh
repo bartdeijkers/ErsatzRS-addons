@@ -162,6 +162,15 @@ discover_shared_list_paths() {
         "$list_work_dir/normalized-list.html" \
         || fail "the Schatkamer shared list is unavailable or private"
 
+    # The page header carries the name the owner gave the list, next to the
+    # marker validated above. Callers fall back to the generic name when a
+    # page omits it.
+    shared_list_name=$(grep -o '"title":"[^"]*","description":"Gedeelde lijst"' \
+        "$list_work_dir/normalized-list.html" \
+        | sed -n '1{s/^"title":"//;s/","description":"Gedeelde lijst"$//;p;}' \
+        | sed -e 's/\\u0026/\&/g' -e 's/\\u003c/</g' -e 's/\\u003e/>/g' \
+            -e "s/\\\\u0027/'/g" -e 's|\\/|/|g')
+
     awk '
         BEGIN {
             marker = "\"url\":\"https://schatkamer.beeldengeluid.nl/serie/"
@@ -267,6 +276,7 @@ list_playlist() {
     trap list_cleanup EXIT HUP INT TERM
     : >"$list_work_dir/seen.txt"
     : >"$list_work_dir/seen-all.txt"
+    shared_list_name=
     if [ "$source_kind" = series ]; then
         discover_series_paths "$playlist_url"
     elif [ "$source_kind" = search ]; then
@@ -278,8 +288,10 @@ list_playlist() {
     if [ "$output_mode" = media-list ]; then
         provider_id=${playlist_url#*://schatkamer.beeldengeluid.nl/}
         provider_id=$(printf '%s' "$provider_id" | json_escape)
+        list_name=${shared_list_name:-Beeld & Geluid Schatkamer}
+        list_name=$(printf '%s' "$list_name" | json_escape)
         printf '%s\n' \
-            "{\"record_type\":\"list\",\"provider_id\":\"$provider_id\",\"name\":\"Beeld & Geluid Schatkamer\",\"description\":\"Programmes selected by the supplied Schatkamer link.\"}" \
+            "{\"record_type\":\"list\",\"provider_id\":\"$provider_id\",\"name\":\"$list_name\",\"description\":\"Programmes selected by the supplied Schatkamer link.\"}" \
             >"$list_work_dir/media-list.ndjson"
     fi
     while IFS= read -r episode_path; do

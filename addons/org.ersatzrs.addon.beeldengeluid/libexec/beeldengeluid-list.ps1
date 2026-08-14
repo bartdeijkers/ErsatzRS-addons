@@ -50,15 +50,7 @@ try {
     $base = $uri.GetLeftPart([UriPartial]::Path).TrimEnd('/')
     $mediaListMode = $env:BEELDENGELUID_OUTPUT -eq 'media-list'
     $mediaListRows = [Collections.Generic.List[string]]::new()
-    if ($mediaListMode) {
-        $listRecord = [ordered]@{
-            record_type = 'list'
-            provider_id = $uri.AbsolutePath.Trim('/') + $uri.Query
-            name = 'Beeld & Geluid Schatkamer'
-            description = 'Programmes selected by the supplied Schatkamer link.'
-        }
-        $mediaListRows.Add(($listRecord | ConvertTo-Json -Compress))
-    }
+    $sharedListName = ''
     $work = Join-Path $env:TEMP ('ersatzrs-beeldengeluid-list-' + [Guid]::NewGuid().ToString('N'))
     [IO.Directory]::CreateDirectory($work) | Out-Null
     try {
@@ -95,6 +87,20 @@ try {
             )) {
                 throw 'shared list is unavailable or private'
             }
+            # The page header carries the name the owner gave the list, next to
+            # the marker validated above.
+            $nameMatch = [regex]::Match(
+                $html,
+                '\\\x22title\\\x22:\\\x22(.*?)\\\x22,\\\x22description\\\x22:\\\x22Gedeelde lijst\\\x22'
+            )
+            if ($nameMatch.Success) {
+                $sharedListName = $nameMatch.Groups[1].Value.
+                    Replace('\u0026', '&').
+                    Replace('\u003c', '<').
+                    Replace('\u003e', '>').
+                    Replace('\u0027', "'").
+                    Replace('\/', '/')
+            }
             $skipped = 0
             $pattern = '\\\x22url\\\x22:\\\x22' +
                 '(https://schatkamer[.]beeldengeluid[.]nl/serie/\d+/[^\\\x22/]+/aflevering/\d+)' +
@@ -112,6 +118,20 @@ try {
         }
 
         if ($paths.Count -eq 0) { throw 'playlist has no playable episodes' }
+        if ($mediaListMode) {
+            $listName = if ($sharedListName) {
+                $sharedListName
+            } else {
+                'Beeld & Geluid Schatkamer'
+            }
+            $listRecord = [ordered]@{
+                record_type = 'list'
+                provider_id = $uri.AbsolutePath.Trim('/') + $uri.Query
+                name = $listName
+                description = 'Programmes selected by the supplied Schatkamer link.'
+            }
+            $mediaListRows.Add(($listRecord | ConvertTo-Json -Compress))
+        }
         $rank = 0
         foreach ($path in $paths) {
             $episodeUrl = 'https://schatkamer.beeldengeluid.nl' + $path

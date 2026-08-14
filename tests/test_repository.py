@@ -243,6 +243,25 @@ cp "$source_file" "$output"
             self.assertEqual(result.stderr, "")
 
     @unittest.skipUnless(pathlib.Path("/bin/sh").exists(), "POSIX shell required")
+    def test_posix_beeldengeluid_names_a_shared_list_after_the_list_itself(self) -> None:
+        shared_page = (
+            r'<script>\"title\":\"Teleac \u0026 Friends\",\"description\":\"Gedeelde lijst\",'
+            r'\"url\":\"https://schatkamer.beeldengeluid.nl/serie/10/first/aflevering/101\",\"isPlayable\":true</script>'
+        )
+        result = self.run_posix_beeldengeluid_list(
+            "https://schatkamer.beeldengeluid.nl/lijst/14df8d33-ce8a-4680-a83b-0cc2a9c58bcd",
+            shared_page,
+            media_list_contract=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        rows = [json.loads(line) for line in result.stdout.splitlines()]
+        self.assertEqual(rows[0]["record_type"], "list")
+        self.assertEqual(rows[0]["name"], "Teleac & Friends")
+        self.assertEqual(
+            rows[0]["provider_id"], "lijst/14df8d33-ce8a-4680-a83b-0cc2a9c58bcd"
+        )
+
+    @unittest.skipUnless(pathlib.Path("/bin/sh").exists(), "POSIX shell required")
     def test_posix_beeldengeluid_enumerates_public_shared_list_in_order(self) -> None:
         shared_page = (
             r'<script>\"description\":\"Gedeelde lijst\",'
@@ -319,6 +338,7 @@ cp "$source_file" "$output"
         rows = [json.loads(line) for line in result.stdout.splitlines()]
         self.assertEqual(rows[0]["record_type"], "list")
         self.assertEqual(rows[0]["provider_id"], "serie/20/fixture")
+        self.assertEqual(rows[0]["name"], "Beeld & Geluid Schatkamer")
         self.assertEqual([row["provider_id"] for row in rows[1:]], ["episode:201", "episode:203"])
         self.assertEqual([row["rank"] for row in rows[1:]], [0, 1])
         self.assertEqual([row["year"] for row in rows[1:]], [1993, 1993])
@@ -406,6 +426,8 @@ printf '%s\n' '{"record_type":"item","provider_id":"video-1","rank":1,"display_t
         self.assertIn("record_type = 'list'", source)
         self.assertIn("record_type = 'item'", source)
         self.assertIn("Gedeelde lijst", source)
+        self.assertIn("$sharedListName", source)
+        self.assertIn("name = $listName", source)
         self.assertIn("isPlayable", source)
         self.assertIn("$seen.Add($path)", source)
         self.assertIn("skipped {0} unavailable Schatkamer shared-list item(s)", source)

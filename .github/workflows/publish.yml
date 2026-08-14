@@ -32,7 +32,7 @@ jobs:
             target: armv7-unknown-linux-gnueabihf
             cross_package: gcc-arm-linux-gnueabihf
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install Rust target
         run: rustup target add "${{ matrix.target }}"
       - name: Install cross compiler
@@ -66,7 +66,7 @@ jobs:
         env:
           ERSATZRS_ADDON_SECRET_CLIENT_ID: fixture
         run: native-artifacts/org.ersatzrs.addon.trakt/bin/linux-x64/ersatzrs-trakt-addon check
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: trakt-${{ matrix.rid }}
           path: native-artifacts
@@ -81,7 +81,7 @@ jobs:
           - rid: osx-arm64
             target: aarch64-apple-darwin
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install Rust target
         run: rustup target add "${{ matrix.target }}"
       - name: Build native Trakt add-on
@@ -90,7 +90,7 @@ jobs:
           destination="native-artifacts/org.ersatzrs.addon.trakt/bin/${{ matrix.rid }}"
           mkdir -p "$destination"
           cp "native/trakt/target/${{ matrix.target }}/release/ersatzrs-trakt-addon" "$destination/ersatzrs-trakt-addon"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: trakt-${{ matrix.rid }}
           path: native-artifacts
@@ -98,7 +98,7 @@ jobs:
   build-trakt-windows:
     runs-on: windows-2022
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Build native Trakt add-on
         run: cargo build --locked --release --manifest-path native/trakt/Cargo.toml --target x86_64-pc-windows-msvc
       - name: Stage native Trakt add-on
@@ -112,7 +112,7 @@ jobs:
         env:
           ERSATZRS_ADDON_SECRET_CLIENT_ID: fixture
         run: native-artifacts/org.ersatzrs.addon.trakt/bin/win-x64/ersatzrs-trakt-addon.exe check
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: trakt-win-x64
           path: native-artifacts
@@ -124,8 +124,8 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         with:
           pattern: trakt-*
           path: native-artifacts
@@ -148,10 +148,10 @@ jobs:
           install -m 600 /dev/null "$RUNNER_TEMP/addon-repository-signing-key.pem"
           printf '%s' "$SIGNING_KEY_PEM" > "$RUNNER_TEMP/addon-repository-signing-key.pem"
           tools/sign_catalog.sh "$RUNNER_TEMP/addon-repository-signing-key.pem" dist/index-v1.json dist/index-v1.json.sig
-      - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: dist
       - name: Deploy GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5

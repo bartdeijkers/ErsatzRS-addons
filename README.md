@@ -5,22 +5,27 @@ signed repository index can contain multiple independently versioned add-ons.
 ErsatzRS installs packages explicitly and starts them as bounded child
 processes; packages are never loaded into the server process.
 
-The initial repository contains:
+The repository contains:
 
-- `org.ersatzrs.addon.beeldengeluid`: enumerates Schatkamer series and public
-  user-made lists and streams their Beeld & Geluid programmes without Python
-  or yt-dlp.
+- `org.ersatzrs.addon.beeldengeluid`: enumerates Schatkamer series, public
+  user-made lists, and saved searches, and streams their programmes. Its Remote
+  Stream path does not require Python or yt-dlp.
 - `org.ersatzrs.addon.yt-dlp`: streams a remote video through an
   operator-installed yt-dlp and the ErsatzRS-managed FFmpeg runtime.
+- `org.ersatzrs.addon.trakt`: imports public Trakt lists through the
+  provider-neutral media-list contract, with its client ID resolved only from
+  an environment or file secret reference.
 
-Both add-ons send video directly to ErsatzRS for immediate playback, much like
+The two streaming add-ons send video directly to ErsatzRS for immediate playback, much like
 casting a video to a Chromecast. They are streaming integrations and are not
 designed to download videos or create a permanent local video collection.
 
 Package contracts are owned by the `ersatzrs-addon-contract` crate in the
 [ErsatzRS repository](https://github.com/bartdeijkers/ErsatzRS). Each package
-keeps its runtime self-contained below `addons/<id>/`; repository tooling may
-use Python but the Beeld & Geluid add-on does not.
+keeps its runtime self-contained below `addons/<id>/`. Repository tooling and
+the provider-list adapters use Python; the Beeld & Geluid Remote Stream
+enumeration and playback path remains implemented directly for POSIX and
+Windows.
 
 ## Build the unsigned repository
 

@@ -4,6 +4,8 @@ setlocal DisableDelayedExpansion
 set "OPERATION=%~1"
 if defined ERSATZRS_ADDON_SETTING_CURL_BIN set "CURL_BIN=%ERSATZRS_ADDON_SETTING_CURL_BIN%"
 if defined ERSATZRS_ADDON_SETTING_ACTION_ID set "BEELDENGELUID_ACTION_ID=%ERSATZRS_ADDON_SETTING_ACTION_ID%"
+set "PYTHON_BIN=%ERSATZRS_ADDON_SETTING_PYTHON_BIN%"
+if not defined PYTHON_BIN set "PYTHON_BIN=python"
 
 if /i "%OPERATION%"=="check" goto :check
 if /i "%OPERATION%"=="list" goto :list
@@ -27,6 +29,10 @@ echo {"status":"unavailable","code":"missing-command","message":"A required exec
 exit /b 0
 
 :list
+if defined ERSATZRS_MEDIA_LIST_URL (
+    "%PYTHON_BIN%" "%~dp0libexec\beeldengeluid-media-list.py"
+    exit /b %ERRORLEVEL%
+)
 if not defined ERSATZRS_REMOTE_STREAM_PLAYLIST_URL (
     >&2 echo playlist URL is required
     exit /b 64

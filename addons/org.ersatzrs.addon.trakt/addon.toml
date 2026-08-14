@@ -1,0 +1,71 @@
+manifest_version = 3
+id = "org.ersatzrs.addon.trakt"
+version = "0.1.0"
+license = "Zlib"
+source_url = "https://github.com/bartdeijkers/ErsatzRS-addons/tree/main/addons/org.ersatzrs.addon.trakt"
+host_version = ">=0.1.0, <0.2.0"
+
+[name]
+"en-US" = "Trakt Lists"
+nl = "Trakt-lijsten"
+"fr-FR" = "Listes Trakt"
+pl = "Listy Trakt"
+"pt-BR" = "Listas do Trakt"
+
+[summary]
+"en-US" = "Import public Trakt lists into ErsatzRS through the add-on media-list contract."
+nl = "Importeer openbare Trakt-lijsten in ErsatzRS via het add-on-medialijstcontract."
+"fr-FR" = "Importe les listes Trakt publiques dans ErsatzRS via le contrat de listes multimédias d'extension."
+pl = "Importuje publiczne listy Trakt do ErsatzRS przez kontrakt list multimediów dodatku."
+"pt-BR" = "Importa listas públicas do Trakt para o ErsatzRS pelo contrato de listas de mídia do complemento."
+
+[[capabilities]]
+id = "addon.check.v1"
+
+[[capabilities]]
+id = "media-list.list.v1"
+
+[entrypoints."linux-x64"]
+path = "addon.sh"
+kind = "posix_shell"
+
+[entrypoints."linux-arm64"]
+path = "addon.sh"
+kind = "posix_shell"
+
+[entrypoints."linux-arm"]
+path = "addon.sh"
+kind = "posix_shell"
+
+[entrypoints."osx-x64"]
+path = "addon.sh"
+kind = "posix_shell"
+
+[entrypoints."osx-arm64"]
+path = "addon.sh"
+kind = "posix_shell"
+
+[entrypoints."win-x64"]
+path = "addon.bat"
+kind = "windows_batch"
+
+[permissions]
+network_hosts = ["api.trakt.tv", "trakt.tv"]
+media_read = false
+managed_ffmpeg = false
+external_commands = ["python3", "python"]
+
+[[settings]]
+key = "CLIENT_ID"
+label = { "en-US" = "Trakt client ID", nl = "Trakt-client-ID", "fr-FR" = "ID client Trakt", pl = "Identyfikator klienta Trakt", "pt-BR" = "ID do cliente Trakt" }
+kind = "secret_reference"
+required = true
+options = []
+suggested_reference = { kind = "environment", reference = "TRAKT__CLIENTID" }
+
+[[settings]]
+key = "PYTHON_BIN"
+label = { "en-US" = "Python executable", nl = "Python-programma", "fr-FR" = "Exécutable Python", pl = "Program Python", "pt-BR" = "Executável Python" }
+kind = "executable"
+required = false
+options = []

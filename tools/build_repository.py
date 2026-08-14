@@ -18,6 +18,7 @@ REPOSITORY_NAME = "Official ErsatzRS add-ons"
 PACKAGE_EPOCH = (2020, 1, 1, 0, 0, 0)
 SUPPORTED_RIDS = {"linux-x64", "linux-arm64", "linux-arm", "osx-x64", "osx-arm64", "win-x64", "any"}
 ENTRYPOINT_KINDS = {"native", "posix_shell", "windows_batch"}
+SETTING_KINDS = {"string", "boolean", "integer", "enum", "path", "executable", "secret_reference"}
 ROOT_FIELDS = {
     "manifest_version", "id", "version", "name", "summary", "license", "source_url",
     "host_version", "icon", "capabilities", "dependencies", "entrypoints", "permissions", "settings", "panels",
@@ -61,7 +62,7 @@ def validate_manifest(manifest: dict, addon_dir: pathlib.Path) -> None:
     unknown = set(manifest) - ROOT_FIELDS
     if unknown:
         raise ValueError(f"{addon_dir}: unknown manifest fields: {sorted(unknown)}")
-    if manifest.get("manifest_version") not in {1, 2}:
+    if manifest.get("manifest_version") not in {1, 2, 3}:
         raise ValueError(f"{addon_dir}: unsupported manifest version")
     icon = manifest.get("icon")
     if manifest.get("manifest_version") == 1 and icon is not None:
@@ -130,6 +131,25 @@ def validate_manifest(manifest: dict, addon_dir: pathlib.Path) -> None:
     keys = [setting.get("key", "") for setting in settings]
     if len(keys) != len(set(keys)) or any(not re.fullmatch(r"[A-Z][A-Z0-9_]*[A-Z0-9]", key) for key in keys):
         raise ValueError(f"{addon_dir}: invalid setting key")
+    for setting in settings:
+        kind = setting.get("kind")
+        if kind not in SETTING_KINDS:
+            raise ValueError(f"{addon_dir}: invalid setting kind")
+        if kind == "secret_reference" and "default" in setting:
+            raise ValueError(f"{addon_dir}: secret references cannot have defaults")
+        suggested = setting.get("suggested_reference")
+        if suggested is None:
+            continue
+        if manifest.get("manifest_version") < 3 or kind != "secret_reference":
+            raise ValueError(f"{addon_dir}: invalid suggested secret reference")
+        if set(suggested) != {"kind", "reference"} or suggested["kind"] not in {"environment", "file"}:
+            raise ValueError(f"{addon_dir}: invalid suggested secret reference")
+        reference = str(suggested["reference"])
+        if not reference.strip() or (
+            suggested["kind"] == "environment"
+            and not re.fullmatch(r"[A-Z][A-Z0-9_]*[A-Z0-9]", reference)
+        ):
+            raise ValueError(f"{addon_dir}: invalid suggested secret reference")
     permissions = manifest.get("permissions", {})
     for command in permissions.get("external_commands", []):
         if not command or any(character in command for character in "/\\:") or any(character.isspace() for character in command):

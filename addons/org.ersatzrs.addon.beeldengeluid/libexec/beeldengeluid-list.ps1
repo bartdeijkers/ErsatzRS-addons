@@ -38,10 +38,11 @@ try {
     $isSeries = $uri.AbsolutePath -match '^/serie/\d+/[^/]+/?$'
     $isSharedList = $uri.AbsolutePath -match
         '^/lijst/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/?$'
+    $isSearch = $uri.AbsolutePath -eq '/zoeken' -and $uri.Query.Length -gt 1
     if (
         $uri.Scheme -notin @('http', 'https') -or
         $uri.Host -ne 'schatkamer.beeldengeluid.nl' -or
-        (-not $isSeries -and -not $isSharedList)
+        (-not $isSeries -and -not $isSharedList -and -not $isSearch)
     ) {
         throw 'unsupported playlist URL'
     }
@@ -55,9 +56,14 @@ try {
         $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
         $paths = [Collections.Generic.List[string]]::new()
 
-        if ($isSeries) {
+        if ($isSeries -or $isSearch) {
             for ($page = 1; $page -le 100; $page++) {
-                Invoke-CurlToFile ($base + '?pagina=' + $page) $pageFile 'series page request failed'
+                $pageUrl = if ($isSearch) {
+                    $uri.GetLeftPart([UriPartial]::Path) + $uri.Query + '&pagina=' + $page
+                } else {
+                    $base + '?pagina=' + $page
+                }
+                Invoke-CurlToFile $pageUrl $pageFile 'programme-list page request failed'
                 $html = [IO.File]::ReadAllText($pageFile)
                 $added = 0
                 foreach ($match in [regex]::Matches(

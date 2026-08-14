@@ -1,9 +1,11 @@
 # Beeld & Geluid add-on
 
-This add-on enumerates a Schatkamer series or public shared list as NDJSON and
-streams individual episodes as MPEG-TS. Its Unix and Windows implementations perform the complete
-provider flow directly; they do not require Python, yt-dlp, browser cookies,
-or stored media URLs.
+This add-on enumerates a Schatkamer series, public shared list, or saved-search
+link as NDJSON and streams individual episodes as MPEG-TS. Its Unix and Windows
+Remote Stream implementations perform the complete provider flow directly;
+they do not require yt-dlp, browser cookies, or stored media URLs. The generic
+media-list projection uses Python to map those programme records onto
+`media-list.list.v1`.
 
 Video is streamed directly through ErsatzRS for immediate playback, comparable
 to casting it to a Chromecast. The add-on does not save a permanent video file
@@ -45,6 +47,11 @@ create_playlist: true
 
 Only public shared lists are supported. Private lists that require a signed-in
 browser session are rejected without replacing the last successful sync.
+
+The add-on list manager also accepts saved-search links such as
+`https://schatkamer.beeldengeluid.nl/zoeken?collectie=<name>`. It preserves the
+programme order returned by Schatkamer and matches the resulting episodes to
+local metadata through the host-owned list synchronizer.
 
 An individual episode definition uses the same identity:
 

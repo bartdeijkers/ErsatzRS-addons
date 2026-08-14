@@ -122,6 +122,35 @@ discover_series_paths() {
         || fail "the Schatkamer series did not contain playable episodes"
 }
 
+discover_search_paths() {
+    search_url=$1
+    page_number=1
+    while [ "$page_number" -le 100 ]; do
+        case "$search_url" in
+            *\?*) page_url="$search_url&pagina=$page_number" ;;
+            *) page_url="$search_url?pagina=$page_number" ;;
+        esac
+        "$curl_bin" --fail --silent --show-error --location \
+            --output "$list_work_dir/page.html" "$page_url" \
+            || fail "the Schatkamer search page request failed"
+        grep -o 'href="/serie/[0-9][0-9]*/[^"/]*/aflevering/[0-9][0-9]*"' \
+            "$list_work_dir/page.html" \
+            | sed -e 's/^href="//' -e 's/"$//' \
+            | awk '!seen[$0]++' >"$list_work_dir/page-links.txt"
+        : >"$list_work_dir/new-links.txt"
+        while IFS= read -r episode_path; do
+            if ! grep -Fqx "$episode_path" "$list_work_dir/seen.txt"; then
+                printf '%s\n' "$episode_path" >>"$list_work_dir/seen.txt"
+                printf '%s\n' "$episode_path" >>"$list_work_dir/new-links.txt"
+            fi
+        done <"$list_work_dir/page-links.txt"
+        [ -s "$list_work_dir/new-links.txt" ] || break
+        page_number=$((page_number + 1))
+    done
+    [ -s "$list_work_dir/seen.txt" ] \
+        || fail "the Schatkamer search did not contain playable episodes"
+}
+
 discover_shared_list_paths() {
     shared_list_url=$1
     "$curl_bin" --fail --silent --show-error --location \
@@ -186,16 +215,22 @@ discover_shared_list_paths() {
 
 list_playlist() {
     [ "$#" -eq 1 ] || { usage; exit 64; }
-    playlist_url=${1%%\?*}
-    playlist_url=${playlist_url%%\#*}
-    playlist_url=${playlist_url%/}
+    playlist_url=${1%%\#*}
     case "$playlist_url" in
+        https://schatkamer.beeldengeluid.nl/zoeken\?* | \
+            http://schatkamer.beeldengeluid.nl/zoeken\?*)
+            source_kind=search
+            ;;
         https://schatkamer.beeldengeluid.nl/serie/*/* | \
             http://schatkamer.beeldengeluid.nl/serie/*/*)
+            playlist_url=${playlist_url%%\?*}
+            playlist_url=${playlist_url%/}
             source_kind=series
             ;;
         https://schatkamer.beeldengeluid.nl/lijst/* | \
             http://schatkamer.beeldengeluid.nl/lijst/*)
+            playlist_url=${playlist_url%%\?*}
+            playlist_url=${playlist_url%/}
             list_id=${playlist_url##*/}
             if ! printf '%s\n' "$list_id" \
                 | LC_ALL=C grep -Eq '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'; then
@@ -229,6 +264,8 @@ list_playlist() {
     : >"$list_work_dir/seen-all.txt"
     if [ "$source_kind" = series ]; then
         discover_series_paths "$playlist_url"
+    elif [ "$source_kind" = search ]; then
+        discover_search_paths "$playlist_url"
     else
         discover_shared_list_paths "$playlist_url"
     fi

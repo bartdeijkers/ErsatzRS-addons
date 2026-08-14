@@ -3,11 +3,13 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import importlib.util
+import io
 import json
 import pathlib
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 import zipfile
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -16,12 +18,20 @@ BUILD_REPOSITORY = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
 SPEC.loader.exec_module(BUILD_REPOSITORY)
 
+TRAKT_SPEC = importlib.util.spec_from_file_location(
+    "trakt_addon", ROOT / "addons" / "org.ersatzrs.addon.trakt" / "trakt.py"
+)
+TRAKT_ADDON = importlib.util.module_from_spec(TRAKT_SPEC)
+assert TRAKT_SPEC.loader is not None
+TRAKT_SPEC.loader.exec_module(TRAKT_ADDON)
+
 
 class RepositoryTests(unittest.TestCase):
     def run_posix_beeldengeluid_list(
         self,
         playlist_url: str,
         list_page: str,
+        media_list_contract: bool = False,
     ) -> subprocess.CompletedProcess[str]:
         addon = ROOT / "addons" / "org.ersatzrs.addon.beeldengeluid" / "addon.sh"
         with tempfile.TemporaryDirectory() as temporary:
@@ -62,8 +72,8 @@ while [ "$#" -gt 0 ]; do
 done
 case "$url" in
     */lijst/*) source_file=$FAKE_FIXTURES/list.html ;;
-    *'?pagina=1') source_file=$FAKE_FIXTURES/series.html ;;
-    *'?pagina='*) source_file=$FAKE_FIXTURES/empty.html ;;
+    *'pagina=1') source_file=$FAKE_FIXTURES/series.html ;;
+    *'pagina='*) source_file=$FAKE_FIXTURES/empty.html ;;
     */aflevering/*) source_file=$FAKE_FIXTURES/episode.html ;;
     *) exit 22 ;;
 esac
@@ -76,9 +86,13 @@ cp "$source_file" "$output"
                 "PATH": "/usr/bin:/bin",
                 "FFMPEG_BIN": "/bin/true",
                 "ERSATZRS_ADDON_SETTING_CURL_BIN": str(fake_curl),
-                "ERSATZRS_REMOTE_STREAM_PLAYLIST_URL": playlist_url,
                 "FAKE_FIXTURES": str(fixtures),
             }
+            environment[
+                "ERSATZRS_MEDIA_LIST_URL"
+                if media_list_contract
+                else "ERSATZRS_REMOTE_STREAM_PLAYLIST_URL"
+            ] = playlist_url
             return subprocess.run(
                 ["/bin/sh", str(addon), "list"],
                 check=False,
@@ -97,18 +111,20 @@ cp "$source_file" "$output"
             index = json.loads(first_index)
             self.assertEqual(index["schema_version"], 2)
             self.assertEqual(index["repository_id"], "org.ersatzrs.addons.official")
-            self.assertEqual(len(index["addons"]), 2)
+            self.assertEqual(len(index["addons"]), 3)
             for addon in index["addons"]:
                 self.assertEqual(addon["license"], "Zlib")
-                self.assertIn("stream", addon["summary"]["en-US"].lower())
-                self.assertIn("not for downloading", addon["summary"]["en-US"].lower())
+                if addon["id"] != "org.ersatzrs.addon.trakt":
+                    self.assertIn("stream", addon["summary"]["en-US"].lower())
+                    self.assertIn("not for downloading", addon["summary"]["en-US"].lower())
                 self.assertEqual(addon["dependencies"], [])
-                icon = addon["icon"]
-                icon_filename = icon["url"].rsplit("/", 1)[1]
-                icon_contents = pathlib.Path(first, "icons", icon_filename).read_bytes()
-                self.assertEqual(hashlib.sha256(icon_contents).hexdigest(), icon["sha256"])
-                self.assertEqual(len(icon_contents), icon["size"])
-                self.assertEqual(icon["media_type"], "png")
+                if "icon" in addon:
+                    icon = addon["icon"]
+                    icon_filename = icon["url"].rsplit("/", 1)[1]
+                    icon_contents = pathlib.Path(first, "icons", icon_filename).read_bytes()
+                    self.assertEqual(hashlib.sha256(icon_contents).hexdigest(), icon["sha256"])
+                    self.assertEqual(len(icon_contents), icon["size"])
+                    self.assertEqual(icon["media_type"], "png")
                 package = addon["packages"]["any"]
                 filename = package["url"].rsplit("/", 1)[1]
                 contents = pathlib.Path(first, "packages", filename).read_bytes()
@@ -116,18 +132,122 @@ cp "$source_file" "$output"
                 self.assertEqual(len(contents), package["size"])
                 with zipfile.ZipFile(pathlib.Path(first, "packages", filename)) as archive:
                     self.assertIn("addon.toml", archive.namelist())
-                    self.assertIn("icon.png", archive.namelist())
+                    if "icon" in addon:
+                        self.assertIn("icon.png", archive.namelist())
                     self.assertEqual(archive.read("LICENSE"), (ROOT / "LICENSE").read_bytes())
                     batch_files = [name for name in archive.namelist() if name.endswith(".bat")]
                     for batch_file in batch_files:
                         contents = archive.read(batch_file)
                         self.assertNotIn(b"\n", contents.replace(b"\r\n", b""))
 
+            trakt = next(
+                addon for addon in index["addons"] if addon["id"] == "org.ersatzrs.addon.trakt"
+            )
+            self.assertIn("media-list.list.v1", trakt["capabilities"])
+
+    def test_trakt_manifest_suggests_only_a_secret_reference_name(self) -> None:
+        manifest = BUILD_REPOSITORY.tomllib.loads(
+            (ROOT / "addons" / "org.ersatzrs.addon.trakt" / "addon.toml").read_text(
+                encoding="utf-8"
+            )
+        )
+        client_id = next(setting for setting in manifest["settings"] if setting["key"] == "CLIENT_ID")
+        self.assertEqual(client_id["kind"], "secret_reference")
+        self.assertNotIn("default", client_id)
+        self.assertEqual(
+            client_id["suggested_reference"],
+            {"kind": "environment", "reference": "TRAKT__CLIENTID"},
+        )
+
+    def test_trakt_guid_projection_matches_ersatzrs_metadata_guid_format(self) -> None:
+        self.assertEqual(
+            TRAKT_ADDON.guid_values(
+                {"trakt": 10, "imdb": "tt1", "tmdb": 20, "tvdb": 30}
+            ),
+            ["imdb://tt1", "tmdb://20", "tvdb://30"],
+        )
+
+    def test_trakt_preserves_ersatztv_list_locator_forms(self) -> None:
+        for value in (
+            "https://trakt.tv/users/some-user/lists/watchlist",
+            "https://app.trakt.tv/users/some-user/lists/watchlist",
+            "https://trakt.tv/users/some-user/watchlist",
+            "https://trakt.tv/lists/some-user/watchlist",
+            "some-user/lists/watchlist",
+            "some-user/watchlist",
+        ):
+            self.assertEqual(TRAKT_ADDON.parse_locator(value), ("some-user", "watchlist"))
+        self.assertIsNone(
+            TRAKT_ADDON.parse_locator("https://example.invalid/users/some-user/lists/watchlist")
+        )
+        self.assertIsNone(
+            TRAKT_ADDON.parse_locator(
+                "https://trakt.tv/users/some-user/lists/watchlist/unexpected"
+            )
+        )
+
+    def test_trakt_skips_provider_records_outside_the_host_media_contract(self) -> None:
+        self.assertIsNone(
+            TRAKT_ADDON.project_item(
+                {"type": "person", "person": {"name": "Fixture", "ids": {"trakt": 1}}},
+                0,
+            )
+        )
+
+    def test_trakt_projects_public_list_without_exposing_client_id(self) -> None:
+        responses = [
+            ({"name": "Fixture list", "description": "Fixture", "ids": {"trakt": 42}}, {}),
+            (
+                [
+                    {
+                        "type": "movie",
+                        "movie": {
+                            "title": "Fixture movie",
+                            "year": 1999,
+                            "ids": {
+                                "trakt": 10,
+                                "imdb": "tt1",
+                                "tmdb": 20,
+                                "tvdb": 30,
+                            },
+                        },
+                    }
+                ],
+                {"X-Pagination-Page-Count": "1"},
+            ),
+        ]
+        output = io.StringIO()
+        with (
+            mock.patch.dict(
+                TRAKT_ADDON.os.environ,
+                {
+                    "ERSATZRS_MEDIA_LIST_URL": "https://trakt.tv/users/test/lists/fixture",
+                    "ERSATZRS_ADDON_SECRET_CLIENT_ID": "fixture-client-id",
+                },
+                clear=True,
+            ),
+            mock.patch.object(TRAKT_ADDON, "request_json", side_effect=responses),
+            mock.patch("sys.stdout", output),
+        ):
+            self.assertEqual(TRAKT_ADDON.list_operation(), 0)
+
+        rows = [json.loads(line) for line in output.getvalue().splitlines()]
+        self.assertEqual(rows[0]["provider_id"], "42")
+        self.assertEqual(rows[1]["guids"], ["imdb://tt1", "tmdb://20", "tvdb://30"])
+        self.assertNotIn("fixture-client-id", output.getvalue())
+
     @unittest.skipUnless(pathlib.Path("/bin/sh").exists(), "POSIX shell required")
     def test_posix_readiness_contracts_emit_one_json_object(self) -> None:
         for addon_id, extra in [
-            ("org.ersatzrs.addon.beeldengeluid", {"ERSATZRS_ADDON_SETTING_CURL_BIN": "/bin/true"}),
+            (
+                "org.ersatzrs.addon.beeldengeluid",
+                {
+                    "ERSATZRS_ADDON_SETTING_CURL_BIN": "/bin/true",
+                    "ERSATZRS_ADDON_SETTING_PYTHON_BIN": "/definitely/missing-python",
+                },
+            ),
             ("org.ersatzrs.addon.yt-dlp", {"ERSATZRS_ADDON_SETTING_YT_DLP_BIN": "/bin/true"}),
+            ("org.ersatzrs.addon.trakt", {"ERSATZRS_ADDON_SECRET_CLIENT_ID": "fixture"}),
         ]:
             environment = {"PATH": "/usr/bin:/bin", "FFMPEG_BIN": "/bin/true", **extra}
             result = subprocess.run(
@@ -140,6 +260,25 @@ cp "$source_file" "$output"
             payload = json.loads(result.stdout)
             self.assertEqual(payload["status"], "ready")
             self.assertEqual(result.stderr, "")
+
+    @unittest.skipUnless(pathlib.Path("/bin/sh").exists(), "POSIX shell required")
+    def test_trakt_readiness_reports_missing_python_without_process_failure(self) -> None:
+        result = subprocess.run(
+            [
+                "/bin/sh",
+                str(ROOT / "addons" / "org.ersatzrs.addon.trakt" / "addon.sh"),
+                "check",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            env={
+                "PATH": "/usr/bin:/bin",
+                "ERSATZRS_ADDON_SETTING_PYTHON_BIN": "/definitely/missing-python",
+            },
+        )
+        self.assertEqual(json.loads(result.stdout)["code"], "missing-command")
+        self.assertEqual(result.stderr, "")
 
     @unittest.skipUnless(pathlib.Path("/bin/sh").exists(), "POSIX shell required")
     def test_posix_beeldengeluid_enumerates_public_shared_list_in_order(self) -> None:
@@ -196,6 +335,29 @@ cp "$source_file" "$output"
         self.assertEqual(result.returncode, 0, result.stderr)
         rows = [json.loads(line) for line in result.stdout.splitlines()]
         self.assertEqual([row["id"] for row in rows], ["201", "203"])
+
+    @unittest.skipUnless(pathlib.Path("/bin/sh").exists(), "POSIX shell required")
+    def test_posix_beeldengeluid_accepts_saved_search_links(self) -> None:
+        result = self.run_posix_beeldengeluid_list(
+            "https://schatkamer.beeldengeluid.nl/zoeken?collectie=fixture",
+            "",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        rows = [json.loads(line) for line in result.stdout.splitlines()]
+        self.assertEqual([row["id"] for row in rows], ["201", "203"])
+
+    @unittest.skipUnless(pathlib.Path("/bin/sh").exists(), "POSIX shell required")
+    def test_posix_beeldengeluid_projects_links_as_media_list_records(self) -> None:
+        result = self.run_posix_beeldengeluid_list(
+            "https://schatkamer.beeldengeluid.nl/serie/20/fixture",
+            "",
+            media_list_contract=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        rows = [json.loads(line) for line in result.stdout.splitlines()]
+        self.assertEqual(rows[0]["record_type"], "list")
+        self.assertEqual([row["provider_id"] for row in rows[1:]], ["episode:201", "episode:203"])
+        self.assertTrue(all(row["kind"] == "episode" for row in rows[1:]))
 
     def test_windows_beeldengeluid_declares_shared_list_contract(self) -> None:
         batch_source = (

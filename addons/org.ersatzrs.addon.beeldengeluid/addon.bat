@@ -3,7 +3,6 @@ setlocal DisableDelayedExpansion
 
 set "OPERATION=%~1"
 if defined ERSATZRS_ADDON_SETTING_CURL_BIN set "CURL_BIN=%ERSATZRS_ADDON_SETTING_CURL_BIN%"
-if defined ERSATZRS_ADDON_SETTING_ACTION_ID set "BEELDENGELUID_ACTION_ID=%ERSATZRS_ADDON_SETTING_ACTION_ID%"
 
 if /i "%OPERATION%"=="check" goto :check
 if /i "%OPERATION%"=="list" goto :list

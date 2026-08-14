@@ -10,9 +10,16 @@ contracts directly.
 Video is streamed straight through ErsatzRS for immediate playback; no
 permanent file is written.
 
+When enabled, ErsatzRS creates a managed local source named `beeldengeluid`.
+Its default root is `<ErsatzRS profile>/beeldengeluid_media`; the path can be
+changed under **Settings > Add-ons**. Every link added through **Media Sources
+> Add-on Lists** gets its own subfolder and Remote Streams library. The folder
+contains only the managed playlist manifest and generated stream definitions,
+not downloaded video files.
+
 Required network destinations and executables are declared in `addon.toml`.
-ErsatzRS supplies its managed FFmpeg path. The optional curl path and emergency
-Server Action ID can be configured on **Settings > Add-ons**.
+ErsatzRS supplies its managed FFmpeg path. An optional custom curl path can be
+configured on **Settings > Add-ons**.
 
 A managed playlist uses the stable add-on identity:
 
@@ -49,8 +56,8 @@ browser session are rejected without replacing the last successful sync.
 
 The add-on list manager also accepts saved-search links such as
 `https://schatkamer.beeldengeluid.nl/zoeken?collectie=<name>`. It preserves the
-programme order returned by Schatkamer and matches the resulting episodes to
-local metadata through the host-owned list synchronizer.
+programme order returned by Schatkamer. The host-owned list synchronizer links
+the records to the Remote Streams generated in that list's managed library.
 
 An individual episode definition uses the same identity:
 

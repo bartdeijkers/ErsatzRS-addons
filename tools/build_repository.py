@@ -21,7 +21,7 @@ ENTRYPOINT_KINDS = {"native", "posix_shell", "windows_batch"}
 SETTING_KINDS = {"string", "boolean", "integer", "enum", "path", "executable", "secret_reference"}
 ROOT_FIELDS = {
     "manifest_version", "id", "version", "name", "summary", "license", "source_url",
-    "host_version", "icon", "capabilities", "dependencies", "entrypoints", "permissions", "settings", "panels",
+    "host_version", "icon", "capabilities", "dependencies", "entrypoints", "permissions", "settings", "media_list_storage", "panels",
 }
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 MAX_ICON_BYTES = 2 * 1024 * 1024
@@ -155,6 +155,26 @@ def validate_manifest(manifest: dict, addon_dir: pathlib.Path) -> None:
             and not re.fullmatch(r"[A-Z][A-Z0-9_]*[A-Z0-9]", reference)
         ):
             raise ValueError(f"{addon_dir}: invalid suggested secret reference")
+    storage = manifest.get("media_list_storage")
+    if storage is not None:
+        required_capabilities = {
+            "media-list.list.v1", "remote-stream.list.v1", "remote-stream.play.v1"
+        }
+        setting = next(
+            (item for item in settings if item.get("key") == storage.get("path_setting")),
+            None,
+        )
+        if (
+            manifest.get("manifest_version") < 3
+            or set(storage) != {"path_setting", "default_subdirectory", "source_name"}
+            or setting is None
+            or setting.get("kind") != "path"
+            or "default" in setting
+            or not re.fullmatch(r"[^/\\:.]+", str(storage.get("default_subdirectory", "")))
+            or not str(storage.get("source_name", "")).strip()
+            or not required_capabilities.issubset(capabilities)
+        ):
+            raise ValueError(f"{addon_dir}: invalid media-list storage contract")
     permissions = manifest.get("permissions", {})
     for command in permissions.get("external_commands", []):
         if not command or any(character in command for character in "/\\:") or any(character.isspace() for character in command):

@@ -7,9 +7,6 @@ operation=${1:-}
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 curl_bin=${ERSATZRS_ADDON_SETTING_CURL_BIN:-curl}
 export CURL_BIN=$curl_bin
-if [ -n "${ERSATZRS_ADDON_SETTING_ACTION_ID:-}" ]; then
-    export BEELDENGELUID_ACTION_ID=$ERSATZRS_ADDON_SETTING_ACTION_ID
-fi
 
 have_program() {
     [ -x "$1" ] || command -v "$1" >/dev/null 2>&1

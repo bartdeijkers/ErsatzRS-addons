@@ -212,8 +212,9 @@ try {
                     rank = $rank
                     display_title = $title
                     title = $title
-                    kind = 'episode'
+                    kind = 'remote_stream'
                     guids = @()
+                    source_url = $episodeUrl
                 }
                 if ($published) { $item.year = [int]$published.Substring(0, 4) }
                 $mediaListRows.Add(($item | ConvertTo-Json -Depth 2 -Compress))

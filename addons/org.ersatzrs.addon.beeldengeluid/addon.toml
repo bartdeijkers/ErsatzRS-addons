@@ -1,6 +1,6 @@
-manifest_version = 2
+manifest_version = 3
 id = "org.ersatzrs.addon.beeldengeluid"
-version = "0.2.2"
+version = "0.3.0"
 license = "Zlib"
 source_url = "https://github.com/bartdeijkers/ErsatzRS-addons/tree/main/addons/org.ersatzrs.addon.beeldengeluid"
 host_version = ">=0.1.0, <0.2.0"
@@ -66,6 +66,13 @@ managed_ffmpeg = true
 external_commands = ["curl", "awk", "grep", "dd", "sed", "mktemp", "powershell.exe"]
 
 [[settings]]
+key = "MEDIA_STORAGE_PATH"
+label = { "en-US" = "Media storage location", nl = "Opslaglocatie voor media", "fr-FR" = "Emplacement de stockage des médias", pl = "Lokalizacja przechowywania multimediów", "pt-BR" = "Local de armazenamento de mídia", "de-DE" = "Medienspeicherort", "it-IT" = "Percorso di archiviazione dei contenuti multimediali", "es-419" = "Ubicación de almacenamiento multimedia", "es-ES" = "Ubicación de almacenamiento multimedia" }
+kind = "path"
+required = false
+options = []
+
+[[settings]]
 key = "CURL_BIN"
 label = { "en-US" = "curl executable", nl = "curl-programma", "fr-FR" = "Exécutable curl", pl = "Program curl", "pt-BR" = "Executável curl" }
 kind = "executable"
@@ -73,9 +80,7 @@ required = false
 default = "curl"
 options = []
 
-[[settings]]
-key = "ACTION_ID"
-label = { "en-US" = "Emergency Server Action ID", nl = "Server Action-ID voor noodgevallen", "fr-FR" = "ID Server Action de secours", pl = "Awaryjny identyfikator Server Action", "pt-BR" = "ID de emergência do Server Action" }
-kind = "string"
-required = false
-options = []
+[media_list_storage]
+path_setting = "MEDIA_STORAGE_PATH"
+default_subdirectory = "beeldengeluid_media"
+source_name = "beeldengeluid"

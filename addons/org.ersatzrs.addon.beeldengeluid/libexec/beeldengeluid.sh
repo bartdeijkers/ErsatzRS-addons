@@ -364,8 +364,8 @@ list_playlist() {
             "$list_work_dir/episode.html" >"$list_work_dir/broadcasters.txt" || true
 
         if [ "$output_mode" = media-list ]; then
-            printf '{"record_type":"item","provider_id":"episode:%s","rank":%s,"display_title":"%s","title":"%s","kind":"episode","guids":[]' \
-                "$episode_id" "$rank" "$title" "$title" \
+            printf '{"record_type":"item","provider_id":"episode:%s","rank":%s,"display_title":"%s","title":"%s","kind":"remote_stream","guids":[],"source_url":"%s"' \
+                "$episode_id" "$rank" "$title" "$title" "$episode_url" \
                 >>"$list_work_dir/media-list.ndjson"
             [ -z "$year" ] \
                 || printf ',"year":%s' "$year" >>"$list_work_dir/media-list.ndjson"
@@ -536,43 +536,41 @@ trap cleanup EXIT HUP INT TERM
     "$episode_url" \
     || fail "the Schatkamer episode page request failed"
 
-stream_action_id=${BEELDENGELUID_ACTION_ID:-}
-if [ -z "$stream_action_id" ]; then
-    LC_ALL=C grep -aoE 'src="[^"]+\.js[^"]*"' "$page_file" \
-        | sed -e 's/^src="//' -e 's/"$//' \
-        >"$chunks_file" || true
+LC_ALL=C grep -aoE 'src="[^"]+\.js[^"]*"' "$page_file" \
+    | sed -e 's/^src="//' -e 's/"$//' \
+    >"$chunks_file" || true
 
-    while IFS= read -r chunk_path; do
-        case "$chunk_path" in
-            /_next/static/chunks/*.js*)
-                ;;
-            *)
-                continue
-                ;;
-        esac
+stream_action_id=
+while IFS= read -r chunk_path; do
+    case "$chunk_path" in
+        /_next/static/chunks/*.js*)
+            ;;
+        *)
+            continue
+            ;;
+    esac
 
-        "$curl_bin" \
-            --fail \
-            --silent \
-            --show-error \
-            --location \
-            --cookie "$cookies_file" \
-            --output "$chunk_file" \
-            "https://schatkamer.beeldengeluid.nl$chunk_path" \
-            || continue
+    "$curl_bin" \
+        --fail \
+        --silent \
+        --show-error \
+        --location \
+        --cookie "$cookies_file" \
+        --output "$chunk_file" \
+        "https://schatkamer.beeldengeluid.nl$chunk_path" \
+        || continue
 
-        action_reference=$(LC_ALL=C grep -aoE \
-            '"[0-9a-f]{32,64}"[^;]{0,300}"getProgramStreamById"' \
-            "$chunk_file" \
-            | sed -n '1p' \
-            || true)
-        if [ -n "$action_reference" ]; then
-            stream_action_id=$(printf '%s' "$action_reference" \
-                | sed -n 's/^"\([0-9a-f]\{32,64\}\)".*/\1/p')
-            [ -n "$stream_action_id" ] && break
-        fi
-    done <"$chunks_file"
-fi
+    action_reference=$(LC_ALL=C grep -aoE \
+        '"[0-9a-f]{32,64}"[^;]{0,300}"getProgramStreamById"' \
+        "$chunk_file" \
+        | sed -n '1p' \
+        || true)
+    if [ -n "$action_reference" ]; then
+        stream_action_id=$(printf '%s' "$action_reference" \
+            | sed -n 's/^"\([0-9a-f]\{32,64\}\)".*/\1/p')
+        [ -n "$stream_action_id" ] && break
+    fi
+done <"$chunks_file"
 
 if [ "${#stream_action_id}" -lt 32 ] || [ "${#stream_action_id}" -gt 64 ]; then
     fail "unable to discover a valid getProgramStreamById action"

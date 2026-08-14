@@ -76,8 +76,6 @@ if errorlevel 1 (
     goto :failed
 )
 
-if defined BEELDENGELUID_ACTION_ID goto :use_action_override
-
 powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ^
     "$ErrorActionPreference = 'Stop';" ^
     "$html = [IO.File]::ReadAllText($env:PAGE_FILE);" ^
@@ -97,14 +95,6 @@ if errorlevel 1 (
     >&2 echo beeldengeluid.bat: unable to discover getProgramStreamById
     goto :failed
 )
-goto :action_ready
-
-:use_action_override
-powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ^
-    "[IO.File]::WriteAllText($env:ACTION_FILE, $env:BEELDENGELUID_ACTION_ID)"
-if errorlevel 1 goto :failed
-
-:action_ready
 
 set /p "STREAM_ACTION_ID="<"%ACTION_FILE%"
 powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ^

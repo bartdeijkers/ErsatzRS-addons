@@ -173,22 +173,35 @@ cp "$source_file" "$output"
                 with zipfile.ZipFile(pathlib.Path(first, "packages", filename)) as archive:
                     self.assertNotIn("libexec/beeldengeluid-media-list.py", archive.namelist())
 
-    def test_beeldengeluid_manifest_has_no_python_runtime(self) -> None:
+    def test_beeldengeluid_has_minimal_runtime_configuration(self) -> None:
+        addon_root = ROOT / "addons" / "org.ersatzrs.addon.beeldengeluid"
         manifest = BUILD_REPOSITORY.tomllib.loads(
-            (
-                ROOT
-                / "addons"
-                / "org.ersatzrs.addon.beeldengeluid"
-                / "addon.toml"
-            ).read_text(encoding="utf-8")
+            (addon_root / "addon.toml").read_text(encoding="utf-8")
         )
         self.assertEqual(
             [setting["key"] for setting in manifest["settings"]],
-            ["CURL_BIN", "ACTION_ID"],
+            ["MEDIA_STORAGE_PATH", "CURL_BIN"],
+        )
+        self.assertEqual(
+            manifest["media_list_storage"],
+            {
+                "path_setting": "MEDIA_STORAGE_PATH",
+                "default_subdirectory": "beeldengeluid_media",
+                "source_name": "beeldengeluid",
+            },
         )
         self.assertFalse(
             {"python", "python3"} & set(manifest["permissions"]["external_commands"])
         )
+        for relative_path in [
+            "addon.sh",
+            "addon.bat",
+            "libexec/beeldengeluid.sh",
+            "libexec/beeldengeluid.bat",
+        ]:
+            contents = (addon_root / relative_path).read_text(encoding="utf-8")
+            self.assertNotIn("ERSATZRS_ADDON_SETTING_ACTION_ID", contents)
+            self.assertNotIn("BEELDENGELUID_ACTION_ID", contents)
 
     def test_trakt_manifest_suggests_only_a_secret_reference_name(self) -> None:
         manifest = BUILD_REPOSITORY.tomllib.loads(
@@ -309,7 +322,61 @@ cp "$source_file" "$output"
         self.assertEqual([row["provider_id"] for row in rows[1:]], ["episode:201", "episode:203"])
         self.assertEqual([row["rank"] for row in rows[1:]], [0, 1])
         self.assertEqual([row["year"] for row in rows[1:]], [1993, 1993])
-        self.assertTrue(all(row["kind"] == "episode" for row in rows[1:]))
+        self.assertTrue(all(row["kind"] == "remote_stream" for row in rows[1:]))
+        self.assertTrue(all(row["source_url"].startswith("https://") for row in rows[1:]))
+
+    def test_yt_dlp_declares_file_backed_list_storage(self) -> None:
+        manifest = BUILD_REPOSITORY.tomllib.loads(
+            (
+                ROOT
+                / "addons"
+                / "org.ersatzrs.addon.yt-dlp"
+                / "addon.toml"
+            ).read_text(encoding="utf-8")
+        )
+        self.assertEqual(manifest["manifest_version"], 3)
+        self.assertTrue(
+            {"media-list.list.v1", "remote-stream.list.v1", "remote-stream.play.v1"}
+            <= {item["id"] for item in manifest["capabilities"]}
+        )
+        self.assertEqual(
+            manifest["media_list_storage"],
+            {
+                "path_setting": "MEDIA_STORAGE_PATH",
+                "default_subdirectory": "yt-dlp_media",
+                "source_name": "yt-dlp",
+            },
+        )
+
+    @unittest.skipUnless(pathlib.Path("/bin/sh").exists(), "POSIX shell required")
+    def test_posix_yt_dlp_projects_playlist_as_remote_stream_records(self) -> None:
+        addon = ROOT / "addons" / "org.ersatzrs.addon.yt-dlp" / "addon.sh"
+        with tempfile.TemporaryDirectory() as temporary:
+            fake = pathlib.Path(temporary) / "yt-dlp"
+            fake.write_text(
+                """#!/bin/sh
+printf '%s\n' '{"record_type":"item","provider_id":"video-1","rank":1,"display_title":"Fixture","title":"Fixture","kind":"remote_stream","guids":[],"source_url":"https://video.example/watch?v=1"}'
+""",
+                encoding="utf-8",
+            )
+            fake.chmod(0o755)
+            result = subprocess.run(
+                ["/bin/sh", str(addon), "list"],
+                check=False,
+                capture_output=True,
+                text=True,
+                env={
+                    "PATH": "/usr/bin:/bin",
+                    "FFMPEG_BIN": "/bin/true",
+                    "ERSATZRS_ADDON_SETTING_YT_DLP_BIN": str(fake),
+                    "ERSATZRS_MEDIA_LIST_URL": "https://video.example/playlist?id=fixture",
+                },
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        rows = [json.loads(line) for line in result.stdout.splitlines()]
+        self.assertEqual(rows[0]["record_type"], "list")
+        self.assertEqual(rows[1]["kind"], "remote_stream")
+        self.assertEqual(rows[1]["source_url"], "https://video.example/watch?v=1")
 
     def test_windows_beeldengeluid_declares_shared_list_contract(self) -> None:
         entrypoint_batch_source = (

@@ -3,13 +3,11 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import importlib.util
-import io
 import json
 import pathlib
 import subprocess
 import tempfile
 import unittest
-from unittest import mock
 import zipfile
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -18,15 +16,18 @@ BUILD_REPOSITORY = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
 SPEC.loader.exec_module(BUILD_REPOSITORY)
 
-TRAKT_SPEC = importlib.util.spec_from_file_location(
-    "trakt_addon", ROOT / "addons" / "org.ersatzrs.addon.trakt" / "trakt.py"
-)
-TRAKT_ADDON = importlib.util.module_from_spec(TRAKT_SPEC)
-assert TRAKT_SPEC.loader is not None
-TRAKT_SPEC.loader.exec_module(TRAKT_ADDON)
-
-
 class RepositoryTests(unittest.TestCase):
+    def write_native_artifacts(self, root: pathlib.Path) -> None:
+        manifest = BUILD_REPOSITORY.tomllib.loads(
+            (ROOT / "addons" / "org.ersatzrs.addon.trakt" / "addon.toml").read_text(
+                encoding="utf-8"
+            )
+        )
+        for entrypoint in manifest["entrypoints"].values():
+            destination = root / manifest["id"] / entrypoint["path"]
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(b"fixture native executable")
+
     def run_posix_beeldengeluid_list(
         self,
         playlist_url: str,
@@ -103,9 +104,19 @@ cp "$source_file" "$output"
 
     def test_build_is_reproducible_and_catalog_hashes_match(self) -> None:
         generated = dt.datetime(2026, 8, 11, 12, 0, tzinfo=dt.timezone.utc)
-        with tempfile.TemporaryDirectory() as first, tempfile.TemporaryDirectory() as second:
-            BUILD_REPOSITORY.build(ROOT, pathlib.Path(first), 7, "https://example.test/addons", generated)
-            BUILD_REPOSITORY.build(ROOT, pathlib.Path(second), 7, "https://example.test/addons", generated)
+        with (
+            tempfile.TemporaryDirectory() as first,
+            tempfile.TemporaryDirectory() as second,
+            tempfile.TemporaryDirectory() as artifacts,
+        ):
+            artifact_root = pathlib.Path(artifacts)
+            self.write_native_artifacts(artifact_root)
+            BUILD_REPOSITORY.build(
+                ROOT, pathlib.Path(first), 7, "https://example.test/addons", generated, artifact_root
+            )
+            BUILD_REPOSITORY.build(
+                ROOT, pathlib.Path(second), 7, "https://example.test/addons", generated, artifact_root
+            )
             first_index = pathlib.Path(first, "index-v1.json").read_bytes()
             self.assertEqual(first_index, pathlib.Path(second, "index-v1.json").read_bytes())
             index = json.loads(first_index)
@@ -125,25 +136,31 @@ cp "$source_file" "$output"
                     self.assertEqual(hashlib.sha256(icon_contents).hexdigest(), icon["sha256"])
                     self.assertEqual(len(icon_contents), icon["size"])
                     self.assertEqual(icon["media_type"], "png")
-                package = addon["packages"]["any"]
-                filename = package["url"].rsplit("/", 1)[1]
-                contents = pathlib.Path(first, "packages", filename).read_bytes()
-                self.assertEqual(hashlib.sha256(contents).hexdigest(), package["sha256"])
-                self.assertEqual(len(contents), package["size"])
-                with zipfile.ZipFile(pathlib.Path(first, "packages", filename)) as archive:
-                    self.assertIn("addon.toml", archive.namelist())
-                    if "icon" in addon:
-                        self.assertIn("icon.png", archive.namelist())
-                    self.assertEqual(archive.read("LICENSE"), (ROOT / "LICENSE").read_bytes())
-                    batch_files = [name for name in archive.namelist() if name.endswith(".bat")]
-                    for batch_file in batch_files:
-                        contents = archive.read(batch_file)
-                        self.assertNotIn(b"\n", contents.replace(b"\r\n", b""))
+                for rid, package in addon["packages"].items():
+                    filename = package["url"].rsplit("/", 1)[1]
+                    contents = pathlib.Path(first, "packages", filename).read_bytes()
+                    self.assertEqual(hashlib.sha256(contents).hexdigest(), package["sha256"])
+                    self.assertEqual(len(contents), package["size"])
+                    with zipfile.ZipFile(pathlib.Path(first, "packages", filename)) as archive:
+                        self.assertIn("addon.toml", archive.namelist())
+                        if "icon" in addon:
+                            self.assertIn("icon.png", archive.namelist())
+                        self.assertEqual(archive.read("LICENSE"), (ROOT / "LICENSE").read_bytes())
+                        batch_files = [name for name in archive.namelist() if name.endswith(".bat")]
+                        for batch_file in batch_files:
+                            batch_contents = archive.read(batch_file)
+                            self.assertNotIn(b"\n", batch_contents.replace(b"\r\n", b""))
+                        if addon["id"] == "org.ersatzrs.addon.trakt":
+                            executable = "ersatzrs-trakt-addon.exe" if rid == "win-x64" else "ersatzrs-trakt-addon"
+                            self.assertIn(f"bin/{rid}/{executable}", archive.namelist())
+                            self.assertNotIn("trakt.py", archive.namelist())
 
             trakt = next(
                 addon for addon in index["addons"] if addon["id"] == "org.ersatzrs.addon.trakt"
             )
             self.assertIn("media-list.list.v1", trakt["capabilities"])
+            self.assertEqual(set(trakt["packages"]), BUILD_REPOSITORY.SUPPORTED_RIDS - {"any"})
+            self.assertEqual(trakt["permissions"]["external_commands"], [])
 
     def test_trakt_manifest_suggests_only_a_secret_reference_name(self) -> None:
         manifest = BUILD_REPOSITORY.tomllib.loads(
@@ -152,89 +169,16 @@ cp "$source_file" "$output"
             )
         )
         client_id = next(setting for setting in manifest["settings"] if setting["key"] == "CLIENT_ID")
+        self.assertEqual([setting["key"] for setting in manifest["settings"]], ["CLIENT_ID"])
+        self.assertTrue(
+            all(entrypoint["kind"] == "native" for entrypoint in manifest["entrypoints"].values())
+        )
         self.assertEqual(client_id["kind"], "secret_reference")
         self.assertNotIn("default", client_id)
         self.assertEqual(
             client_id["suggested_reference"],
             {"kind": "environment", "reference": "TRAKT__CLIENTID"},
         )
-
-    def test_trakt_guid_projection_matches_ersatzrs_metadata_guid_format(self) -> None:
-        self.assertEqual(
-            TRAKT_ADDON.guid_values(
-                {"trakt": 10, "imdb": "tt1", "tmdb": 20, "tvdb": 30}
-            ),
-            ["imdb://tt1", "tmdb://20", "tvdb://30"],
-        )
-
-    def test_trakt_preserves_ersatztv_list_locator_forms(self) -> None:
-        for value in (
-            "https://trakt.tv/users/some-user/lists/watchlist",
-            "https://app.trakt.tv/users/some-user/lists/watchlist",
-            "https://trakt.tv/users/some-user/watchlist",
-            "https://trakt.tv/lists/some-user/watchlist",
-            "some-user/lists/watchlist",
-            "some-user/watchlist",
-        ):
-            self.assertEqual(TRAKT_ADDON.parse_locator(value), ("some-user", "watchlist"))
-        self.assertIsNone(
-            TRAKT_ADDON.parse_locator("https://example.invalid/users/some-user/lists/watchlist")
-        )
-        self.assertIsNone(
-            TRAKT_ADDON.parse_locator(
-                "https://trakt.tv/users/some-user/lists/watchlist/unexpected"
-            )
-        )
-
-    def test_trakt_skips_provider_records_outside_the_host_media_contract(self) -> None:
-        self.assertIsNone(
-            TRAKT_ADDON.project_item(
-                {"type": "person", "person": {"name": "Fixture", "ids": {"trakt": 1}}},
-                0,
-            )
-        )
-
-    def test_trakt_projects_public_list_without_exposing_client_id(self) -> None:
-        responses = [
-            ({"name": "Fixture list", "description": "Fixture", "ids": {"trakt": 42}}, {}),
-            (
-                [
-                    {
-                        "type": "movie",
-                        "movie": {
-                            "title": "Fixture movie",
-                            "year": 1999,
-                            "ids": {
-                                "trakt": 10,
-                                "imdb": "tt1",
-                                "tmdb": 20,
-                                "tvdb": 30,
-                            },
-                        },
-                    }
-                ],
-                {"X-Pagination-Page-Count": "1"},
-            ),
-        ]
-        output = io.StringIO()
-        with (
-            mock.patch.dict(
-                TRAKT_ADDON.os.environ,
-                {
-                    "ERSATZRS_MEDIA_LIST_URL": "https://trakt.tv/users/test/lists/fixture",
-                    "ERSATZRS_ADDON_SECRET_CLIENT_ID": "fixture-client-id",
-                },
-                clear=True,
-            ),
-            mock.patch.object(TRAKT_ADDON, "request_json", side_effect=responses),
-            mock.patch("sys.stdout", output),
-        ):
-            self.assertEqual(TRAKT_ADDON.list_operation(), 0)
-
-        rows = [json.loads(line) for line in output.getvalue().splitlines()]
-        self.assertEqual(rows[0]["provider_id"], "42")
-        self.assertEqual(rows[1]["guids"], ["imdb://tt1", "tmdb://20", "tvdb://30"])
-        self.assertNotIn("fixture-client-id", output.getvalue())
 
     @unittest.skipUnless(pathlib.Path("/bin/sh").exists(), "POSIX shell required")
     def test_posix_readiness_contracts_emit_one_json_object(self) -> None:
@@ -247,7 +191,6 @@ cp "$source_file" "$output"
                 },
             ),
             ("org.ersatzrs.addon.yt-dlp", {"ERSATZRS_ADDON_SETTING_YT_DLP_BIN": "/bin/true"}),
-            ("org.ersatzrs.addon.trakt", {"ERSATZRS_ADDON_SECRET_CLIENT_ID": "fixture"}),
         ]:
             environment = {"PATH": "/usr/bin:/bin", "FFMPEG_BIN": "/bin/true", **extra}
             result = subprocess.run(
@@ -260,25 +203,6 @@ cp "$source_file" "$output"
             payload = json.loads(result.stdout)
             self.assertEqual(payload["status"], "ready")
             self.assertEqual(result.stderr, "")
-
-    @unittest.skipUnless(pathlib.Path("/bin/sh").exists(), "POSIX shell required")
-    def test_trakt_readiness_reports_missing_python_without_process_failure(self) -> None:
-        result = subprocess.run(
-            [
-                "/bin/sh",
-                str(ROOT / "addons" / "org.ersatzrs.addon.trakt" / "addon.sh"),
-                "check",
-            ],
-            check=True,
-            capture_output=True,
-            text=True,
-            env={
-                "PATH": "/usr/bin:/bin",
-                "ERSATZRS_ADDON_SETTING_PYTHON_BIN": "/definitely/missing-python",
-            },
-        )
-        self.assertEqual(json.loads(result.stdout)["code"], "missing-command")
-        self.assertEqual(result.stderr, "")
 
     @unittest.skipUnless(pathlib.Path("/bin/sh").exists(), "POSIX shell required")
     def test_posix_beeldengeluid_enumerates_public_shared_list_in_order(self) -> None:

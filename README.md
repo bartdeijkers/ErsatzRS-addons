@@ -23,9 +23,9 @@ designed to download videos or create a permanent local video collection.
 Package contracts are owned by the `ersatzrs-addon-contract` crate in the
 [ErsatzRS repository](https://github.com/bartdeijkers/ErsatzRS). Each package
 keeps its runtime self-contained below `addons/<id>/`. Repository tooling and
-the provider-list adapters use Python; the Beeld & Geluid Remote Stream
-enumeration and playback path remains implemented directly for POSIX and
-Windows.
+the Beeld & Geluid provider-list adapter use Python; the Trakt adapter is a
+native Rust executable, and the Beeld & Geluid Remote Stream enumeration and
+playback path remains implemented directly for POSIX and Windows.
 
 ## Build the unsigned repository
 
@@ -35,7 +35,8 @@ Python 3.11 or newer is required only for release tooling:
 python3 tools/build_repository.py \
   --sequence 1 \
   --base-url https://bartdeijkers.github.io/ErsatzRS-addons \
-  --output dist
+  --output dist \
+  --native-artifacts native-artifacts
 ```
 
 This creates deterministic ZIP packages, bounded PNG icon assets, and the exact
@@ -53,12 +54,19 @@ the default repository is visible but intentionally cannot refresh.
 
 ## Development
 
-Run the repository checks without contacting provider services:
+Run the source-level checks without contacting provider services:
 
 ```sh
+cargo fmt --manifest-path native/trakt/Cargo.toml -- --check
+cargo test --locked --manifest-path native/trakt/Cargo.toml
+cargo clippy --locked --manifest-path native/trakt/Cargo.toml --all-targets -- -D warnings
 python3 -m unittest discover -s tests
-python3 tools/build_repository.py --sequence 1 --base-url https://example.test/addons --output dist
 ```
+
+A complete unsigned repository build additionally needs the six native Trakt
+binaries staged below `native-artifacts/org.ersatzrs.addon.trakt/bin/<rid>/`.
+The publishing workflow builds those binaries for every supported ErsatzRS RID
+before packaging and signing the repository.
 
 Live playback tests require authorized provider access and the external tools
 declared by each manifest. Do not place credentials, cookies, private media

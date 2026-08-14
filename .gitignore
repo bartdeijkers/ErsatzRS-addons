@@ -1,4 +1,5 @@
 /dist/
+/native/trakt/target/
 __pycache__/
 *.pyc
 *.pem

@@ -33,6 +33,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--base-url", required=True)
     parser.add_argument("--output", required=True, type=pathlib.Path)
     parser.add_argument("--generated-at")
+    parser.add_argument("--native-artifacts", type=pathlib.Path)
     return parser.parse_args()
 
 
@@ -119,12 +120,16 @@ def validate_manifest(manifest: dict, addon_dir: pathlib.Path) -> None:
         raise ValueError(f"{addon_dir}: unsupported entrypoint RID")
     for entrypoint in entrypoints.values():
         path = entrypoint.get("path", "")
+        entrypoint_path = pathlib.PurePosixPath(path)
         if (
             not path
-            or pathlib.PurePosixPath(path).is_absolute()
-            or ".." in pathlib.PurePosixPath(path).parts
+            or entrypoint_path.is_absolute()
+            or ".." in entrypoint_path.parts
             or entrypoint.get("kind") not in ENTRYPOINT_KINDS
-            or not (addon_dir / path).is_file()
+            or (
+                entrypoint.get("kind") != "native"
+                and not (addon_dir / path).is_file()
+            )
         ):
             raise ValueError(f"{addon_dir}: invalid entrypoint")
     settings = manifest.get("settings", [])
@@ -156,7 +161,13 @@ def validate_manifest(manifest: dict, addon_dir: pathlib.Path) -> None:
             raise ValueError(f"{addon_dir}: invalid external command")
 
 
-def write_package(root: pathlib.Path, addon_dir: pathlib.Path, destination: pathlib.Path) -> None:
+def write_package(
+    root: pathlib.Path,
+    addon_dir: pathlib.Path,
+    destination: pathlib.Path,
+    native_files: dict[str, pathlib.Path] | None = None,
+) -> None:
+    native_files = native_files or {}
     with zipfile.ZipFile(destination, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
         license_info = zipfile.ZipInfo("LICENSE", PACKAGE_EPOCH)
         license_info.compress_type = zipfile.ZIP_DEFLATED
@@ -174,17 +185,22 @@ def write_package(root: pathlib.Path, addon_dir: pathlib.Path, destination: path
             if path.suffix.lower() == ".bat":
                 contents = contents.replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")
             archive.writestr(info, contents)
+        for relative, path in sorted(native_files.items()):
+            if not path.is_file():
+                raise ValueError(f"missing native add-on artifact: {path}")
+            info = zipfile.ZipInfo(relative, PACKAGE_EPOCH)
+            info.compress_type = zipfile.ZIP_DEFLATED
+            info.external_attr = (0o755 & 0xFFFF) << 16
+            archive.writestr(info, path.read_bytes())
 
 
 def catalog_addon(
     addon_dir: pathlib.Path,
-    package_url: str,
-    package_path: pathlib.Path,
+    packages: dict[str, dict],
     icon_url: str | None,
 ) -> dict:
     manifest = tomllib.loads((addon_dir / "addon.toml").read_text(encoding="utf-8"))
     validate_manifest(manifest, addon_dir)
-    digest = hashlib.sha256(package_path.read_bytes()).hexdigest()
     capabilities = [item["id"] for item in manifest.get("capabilities", [])]
     addon = {
         "id": manifest["id"],
@@ -197,13 +213,7 @@ def catalog_addon(
         "capabilities": capabilities,
         "dependencies": manifest.get("dependencies", []),
         "permissions": manifest.get("permissions", {}),
-        "packages": {
-            "any": {
-                "url": package_url,
-                "sha256": digest,
-                "size": package_path.stat().st_size,
-            }
-        },
+        "packages": packages,
     }
     if icon_url is not None:
         icon_path = addon_dir / manifest["icon"]["path"]
@@ -217,7 +227,22 @@ def catalog_addon(
     return addon
 
 
-def build(root: pathlib.Path, output: pathlib.Path, sequence: int, base_url: str, generated: dt.datetime) -> None:
+def package_metadata(base_url: str, filename: str, package_path: pathlib.Path) -> dict:
+    return {
+        "url": f"{base_url}/packages/{filename}",
+        "sha256": hashlib.sha256(package_path.read_bytes()).hexdigest(),
+        "size": package_path.stat().st_size,
+    }
+
+
+def build(
+    root: pathlib.Path,
+    output: pathlib.Path,
+    sequence: int,
+    base_url: str,
+    generated: dt.datetime,
+    native_artifacts: pathlib.Path | None = None,
+) -> None:
     if sequence < 1:
         raise ValueError("sequence must be positive")
     if not base_url.startswith("https://"):
@@ -236,9 +261,30 @@ def build(root: pathlib.Path, output: pathlib.Path, sequence: int, base_url: str
             continue
         manifest = tomllib.loads((addon_dir / "addon.toml").read_text(encoding="utf-8"))
         validate_manifest(manifest, addon_dir)
-        filename = f"{manifest['id']}-{manifest['version']}.zip"
-        package_path = packages_dir / filename
-        write_package(root, addon_dir, package_path)
+        native_entrypoints = {
+            rid: entrypoint
+            for rid, entrypoint in manifest["entrypoints"].items()
+            if entrypoint["kind"] == "native"
+        }
+        catalog_packages = {}
+        if native_entrypoints:
+            if native_artifacts is None:
+                raise ValueError(f"{addon_dir}: --native-artifacts is required")
+            for rid, entrypoint in sorted(manifest["entrypoints"].items()):
+                filename = f"{manifest['id']}-{manifest['version']}-{rid}.zip"
+                package_path = packages_dir / filename
+                native_files = {}
+                if entrypoint["kind"] == "native":
+                    native_files[entrypoint["path"]] = (
+                        native_artifacts / manifest["id"] / entrypoint["path"]
+                    )
+                write_package(root, addon_dir, package_path, native_files)
+                catalog_packages[rid] = package_metadata(base_url, filename, package_path)
+        else:
+            filename = f"{manifest['id']}-{manifest['version']}.zip"
+            package_path = packages_dir / filename
+            write_package(root, addon_dir, package_path)
+            catalog_packages["any"] = package_metadata(base_url, filename, package_path)
         icon_url = None
         if "icon" in manifest:
             icon_filename = f"{manifest['id']}.png"
@@ -247,8 +293,7 @@ def build(root: pathlib.Path, output: pathlib.Path, sequence: int, base_url: str
         addons.append(
             catalog_addon(
                 addon_dir,
-                f"{base_url}/packages/{filename}",
-                package_path,
+                catalog_packages,
                 icon_url,
             )
         )
@@ -269,7 +314,14 @@ def build(root: pathlib.Path, output: pathlib.Path, sequence: int, base_url: str
 def main() -> None:
     args = parse_args()
     root = pathlib.Path(__file__).resolve().parents[1]
-    build(root, args.output.resolve(), args.sequence, args.base_url, utc_timestamp(args.generated_at))
+    build(
+        root,
+        args.output.resolve(),
+        args.sequence,
+        args.base_url,
+        utc_timestamp(args.generated_at),
+        args.native_artifacts.resolve() if args.native_artifacts else None,
+    )
 
 
 if __name__ == "__main__":

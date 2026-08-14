@@ -10,3 +10,6 @@ The preferred form is `https://trakt.tv/users/<user>/lists/<slug>`. For
 ErsatzTV compatibility, `app.trakt.tv` links, the older `/users/<user>/<slug>`
 and `/lists/<user>/<slug>` paths, and `<user>/[lists/]<slug>` shorthand are also
 accepted. Only public lists can be imported.
+
+The package contains a native Rust executable for every ErsatzRS release RID.
+It does not require Python or another operator-installed runtime.

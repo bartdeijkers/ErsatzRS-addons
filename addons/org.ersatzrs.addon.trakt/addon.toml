@@ -1,6 +1,6 @@
 manifest_version = 3
 id = "org.ersatzrs.addon.trakt"
-version = "0.1.0"
+version = "0.2.0"
 license = "Zlib"
 source_url = "https://github.com/bartdeijkers/ErsatzRS-addons/tree/main/addons/org.ersatzrs.addon.trakt"
 host_version = ">=0.1.0, <0.2.0"
@@ -26,34 +26,34 @@ id = "addon.check.v1"
 id = "media-list.list.v1"
 
 [entrypoints."linux-x64"]
-path = "addon.sh"
-kind = "posix_shell"
+path = "bin/linux-x64/ersatzrs-trakt-addon"
+kind = "native"
 
 [entrypoints."linux-arm64"]
-path = "addon.sh"
-kind = "posix_shell"
+path = "bin/linux-arm64/ersatzrs-trakt-addon"
+kind = "native"
 
 [entrypoints."linux-arm"]
-path = "addon.sh"
-kind = "posix_shell"
+path = "bin/linux-arm/ersatzrs-trakt-addon"
+kind = "native"
 
 [entrypoints."osx-x64"]
-path = "addon.sh"
-kind = "posix_shell"
+path = "bin/osx-x64/ersatzrs-trakt-addon"
+kind = "native"
 
 [entrypoints."osx-arm64"]
-path = "addon.sh"
-kind = "posix_shell"
+path = "bin/osx-arm64/ersatzrs-trakt-addon"
+kind = "native"
 
 [entrypoints."win-x64"]
-path = "addon.bat"
-kind = "windows_batch"
+path = "bin/win-x64/ersatzrs-trakt-addon.exe"
+kind = "native"
 
 [permissions]
 network_hosts = ["api.trakt.tv", "trakt.tv"]
 media_read = false
 managed_ffmpeg = false
-external_commands = ["python3", "python"]
+external_commands = []
 
 [[settings]]
 key = "CLIENT_ID"
@@ -62,10 +62,3 @@ kind = "secret_reference"
 required = true
 options = []
 suggested_reference = { kind = "environment", reference = "TRAKT__CLIENTID" }
-
-[[settings]]
-key = "PYTHON_BIN"
-label = { "en-US" = "Python executable", nl = "Python-programma", "fr-FR" = "Exécutable Python", pl = "Program Python", "pt-BR" = "Executável Python" }
-kind = "executable"
-required = false
-options = []

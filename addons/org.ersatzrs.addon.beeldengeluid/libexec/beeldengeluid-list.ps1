@@ -58,6 +58,7 @@ try {
         $episodeFile = Join-Path $work 'episode.html'
         $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
         $paths = [Collections.Generic.List[string]]::new()
+        $availabilityByPath = @{}
 
         if ($isSeries -or $isSearch) {
             for ($page = 1; $page -le 100; $page++) {
@@ -74,7 +75,11 @@ try {
                     'href=\x22(/serie/\d+/[^\x22/]+/aflevering/\d+)\x22'
                 )) {
                     $path = $match.Groups[1].Value
-                    if ($seen.Add($path)) { $paths.Add($path); $added++ }
+                    if ($seen.Add($path)) {
+                        $paths.Add($path)
+                        $availabilityByPath[$path] = 'available'
+                        $added++
+                    }
                 }
                 if ($added -eq 0) { break }
             }
@@ -108,16 +113,22 @@ try {
             foreach ($match in [regex]::Matches($html, $pattern, 'Singleline')) {
                 $path = ([Uri]$match.Groups[1].Value).AbsolutePath
                 if (-not $seen.Add($path)) { continue }
-                if ($match.Groups[2].Value -eq 'true') { $paths.Add($path) } else { $skipped++ }
+                $paths.Add($path)
+                if ($match.Groups[2].Value -eq 'true') {
+                    $availabilityByPath[$path] = 'available'
+                } else {
+                    $availabilityByPath[$path] = 'unavailable'
+                    $skipped++
+                }
             }
             if ($skipped -gt 0) {
                 [Console]::Error.WriteLine(
-                    'beeldengeluid.bat: skipped {0} unavailable Schatkamer shared-list item(s)' -f $skipped
+                    'beeldengeluid.bat: retained {0} unavailable Schatkamer shared-list item(s)' -f $skipped
                 )
             }
         }
 
-        if ($paths.Count -eq 0) { throw 'playlist has no playable episodes' }
+        if ($paths.Count -eq 0) { throw 'playlist has no episodes' }
         if ($mediaListMode) {
             $listName = if ($sharedListName) {
                 $sharedListName
@@ -135,9 +146,51 @@ try {
         $rank = 0
         foreach ($path in $paths) {
             $episodeUrl = 'https://schatkamer.beeldengeluid.nl' + $path
-            Invoke-CurlToFile $episodeUrl $episodeFile 'episode metadata request failed'
-            $html = [IO.File]::ReadAllText($episodeFile)
             $episodeId = $path.Substring($path.LastIndexOf('/') + 1)
+            $availability = if ($availabilityByPath.ContainsKey($path)) {
+                $availabilityByPath[$path]
+            } else { 'available' }
+            try {
+                Invoke-CurlToFile $episodeUrl $episodeFile 'episode metadata request failed'
+            } catch {
+                if ($availability -ne 'unavailable') { throw }
+                $segments = $path.Trim('/').Split('/')
+                $slug = if ($segments.Count -ge 3) {
+                    [Uri]::UnescapeDataString($segments[$segments.Count - 3]).Replace('-', ' ').Replace('_', ' ')
+                } else { '' }
+                $title = if ($slug) { $slug } else { $episodeId }
+                if ($mediaListMode) {
+                    $item = [ordered]@{
+                        record_type = 'item'
+                        provider_id = 'episode:' + $episodeId
+                        rank = $rank
+                        display_title = $title
+                        title = $title
+                        kind = 'remote_stream'
+                        guids = @('beeldengeluid://' + $episodeId)
+                        source_url = $episodeUrl
+                        availability = 'unavailable'
+                        availability_reason = 'not_playable'
+                        content_kind = 'auto'
+                    }
+                    $mediaListRows.Add(($item | ConvertTo-Json -Depth 2 -Compress))
+                    $rank++
+                } else {
+                    [ordered]@{
+                        id = $episodeId
+                        provider_id = 'episode:' + $episodeId
+                        url = $episodeUrl
+                        title = $title
+                        availability = 'unavailable'
+                        availability_reason = 'not_playable'
+                        content_kind = 'auto'
+                        guids = @('beeldengeluid://' + $episodeId)
+                        is_live = $false
+                    } | ConvertTo-Json -Depth 2 -Compress
+                }
+                continue
+            }
+            $html = [IO.File]::ReadAllText($episodeFile)
             $programMarker = '\' + [char]34 + 'program\' + [char]34 +
                 ':{\' + [char]34 + 'id\' + [char]34 + ':\' + [char]34 +
                 $episodeId + '\' + [char]34
@@ -184,11 +237,32 @@ try {
                 'href=\x22/zoeken[?]collectie=[^\x22]*\x22[^>]*>([^<]*)'
             )
 
+            $genres = @(JsonArrayValues $programHtml 'genres' 'subjects')
+            $subjects = @(JsonArrayValues $programHtml 'subjects' 'collection')
+            $classificationText = (($genres + $subjects) -join ' ').ToLowerInvariant()
+            $contentKind = if ($classificationText -match 'reclame|commercial|advertentie') {
+                'other_video'
+            } elseif ($classificationText -match 'muziek|music|concert|videoclip|music video') {
+                'music_video'
+            } elseif ($classificationText -match 'speelfilm|film|movie') {
+                'movie'
+            } elseif ($series) {
+                'television_episode'
+            } else {
+                'other_video'
+            }
+
             $row = [ordered]@{
                 id = $episodeId
+                provider_id = 'episode:' + $episodeId
                 url = $episodeUrl
                 title = $title
+                availability = $availability
+                content_kind = $contentKind
+                guids = @('beeldengeluid://' + $episodeId)
             }
+            if ($availability -eq 'unavailable') { $row.availability_reason = 'not_playable' }
+            if ($series) { $row.show_title = $series }
             if ($duration.Success) { $row.duration_seconds = [int64]$duration.Groups[1].Value }
             if ($plot) { $row.plot = $plot }
             if ($published) {
@@ -196,8 +270,8 @@ try {
                 $row.year = [int]$published.Substring(0, 4)
             }
             if ($rating) { $row.content_rating = $rating }
-            $row.genres = @(JsonArrayValues $programHtml 'genres' 'subjects')
-            $row.tags = @(JsonArrayValues $programHtml 'subjects' 'collection')
+            $row.genres = $genres
+            $row.tags = $subjects
             if ($collectionMatch.Success) {
                 $row.collection = [Net.WebUtility]::HtmlDecode($collectionMatch.Groups[1].Value)
             }
@@ -233,9 +307,12 @@ try {
                     display_title = $title
                     title = $title
                     kind = 'remote_stream'
-                    guids = @()
+                    guids = @('beeldengeluid://' + $episodeId)
                     source_url = $episodeUrl
+                    availability = $availability
+                    content_kind = $contentKind
                 }
+                if ($availability -eq 'unavailable') { $item.availability_reason = 'not_playable' }
                 if ($published) { $item.year = [int]$published.Substring(0, 4) }
                 $mediaListRows.Add(($item | ConvertTo-Json -Depth 2 -Compress))
                 $rank++

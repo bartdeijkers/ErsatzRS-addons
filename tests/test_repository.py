@@ -33,6 +33,7 @@ class RepositoryTests(unittest.TestCase):
         playlist_url: str,
         list_page: str,
         media_list_contract: bool = False,
+        episode_page: str | None = None,
     ) -> subprocess.CompletedProcess[str]:
         addon = ROOT / "addons" / "org.ersatzrs.addon.beeldengeluid" / "addon.sh"
         with tempfile.TemporaryDirectory() as temporary:
@@ -44,7 +45,7 @@ class RepositoryTests(unittest.TestCase):
                 encoding="utf-8",
             )
             (fixtures / "empty.html").write_text("<html></html>", encoding="utf-8")
-            (fixtures / "episode.html").write_text(
+            default_episode_page = (
                 '<h1>Fixture Series</h1><h3>Fixture Episode</h3>'
                 '<a href="/zoeken?collectie=fixture">Fixture Collection</a>'
                 r'<script>\"description\":\"Fixture plot\",\"disclaimer\":null,'
@@ -55,7 +56,10 @@ class RepositoryTests(unittest.TestCase):
                 r'\"guests\":[],\"directors\":[],\"performers\":[],\"others\":[],'
                 r'\"productionCompanies\":[\"Fixture Producer\"],\"genres\":[\"Education\"],'
                 r'\"originalBroadcasters\":[{\"name\":\"Original TV\"}],\"broadcaster\":null,'
-                r'\"broadcasters\":[{\"name\":\"Current TV\"}],\"url\":\"fixture\"</script>',
+                r'\"broadcasters\":[{\"name\":\"Current TV\"}],\"url\":\"fixture\"</script>'
+            )
+            (fixtures / "episode.html").write_text(
+                episode_page if episode_page is not None else default_episode_page,
                 encoding="utf-8",
             )
             fake_curl = fixtures / "curl"
@@ -75,6 +79,7 @@ case "$url" in
     */lijst/*) source_file=$FAKE_FIXTURES/list.html ;;
     *'pagina=1') source_file=$FAKE_FIXTURES/series.html ;;
     *'pagina='*) source_file=$FAKE_FIXTURES/empty.html ;;
+    */aflevering/102) exit 22 ;;
     */aflevering/*) source_file=$FAKE_FIXTURES/episode.html ;;
     *) exit 22 ;;
 esac
@@ -276,7 +281,7 @@ cp "$source_file" "$output"
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         rows = [json.loads(line) for line in result.stdout.splitlines()]
-        self.assertEqual([row["id"] for row in rows], ["101", "103"])
+        self.assertEqual([row["id"] for row in rows], ["101", "102", "103"])
         self.assertEqual(rows[0]["plot"], "Fixture plot")
         self.assertEqual(rows[0]["duration_seconds"], 120)
         self.assertEqual(rows[0]["genres"], ["Education"])
@@ -286,10 +291,44 @@ cp "$source_file" "$output"
         self.assertEqual(rows[0]["producers"], ["Fixture Producer"])
         self.assertEqual(rows[0]["original_broadcasters"], ["Original TV"])
         self.assertEqual(rows[0]["broadcasters"], ["Current TV"])
+        self.assertEqual(rows[0]["availability"], "available")
+        self.assertEqual(rows[0]["content_kind"], "television_episode")
+        self.assertEqual(rows[0]["provider_id"], "episode:101")
+        self.assertEqual(rows[0]["guids"], ["beeldengeluid://101"])
+        self.assertEqual(rows[1]["title"], "missing")
+        self.assertEqual(rows[1]["availability"], "unavailable")
+        self.assertEqual(rows[1]["availability_reason"], "not_playable")
+        self.assertEqual(rows[1]["content_kind"], "auto")
         self.assertEqual(
             result.stderr,
-            "beeldengeluid.sh: skipped 1 unavailable Schatkamer shared-list item(s)\n",
+            "beeldengeluid.sh: retained 1 unavailable Schatkamer shared-list item(s)\n",
         )
+
+    @unittest.skipUnless(pathlib.Path("/bin/sh").exists(), "POSIX shell required")
+    def test_posix_beeldengeluid_classifies_provider_metadata(self) -> None:
+        cases = [
+            ("Education", "television_episode"),
+            ("Music concert", "music_video"),
+            ("Speelfilm", "movie"),
+            ("Reclame", "other_video"),
+        ]
+        for genre, expected in cases:
+            with self.subTest(genre=genre):
+                episode_page = (
+                    '<h1>Fixture Series</h1><h3>Fixture Episode</h3>'
+                    '<script>\\"description\\":\\"Fixture plot\\",\\"disclaimer\\":null,'
+                    f'\\"genres\\":[\\"{genre}\\"],'
+                    r'\"subjects\":[],\"collection\":null,\"url\":\"fixture\"</script>'
+                )
+                result = self.run_posix_beeldengeluid_list(
+                    "https://schatkamer.beeldengeluid.nl/serie/20/fixture",
+                    "",
+                    episode_page=episode_page,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                rows = [json.loads(line) for line in result.stdout.splitlines()]
+                self.assertTrue(rows)
+                self.assertTrue(all(row["content_kind"] == expected for row in rows))
 
     @unittest.skipUnless(pathlib.Path("/bin/sh").exists(), "POSIX shell required")
     def test_posix_beeldengeluid_rejects_unavailable_and_invalid_shared_lists(self) -> None:
@@ -356,7 +395,13 @@ cp "$source_file" "$output"
         )
         self.assertEqual(manifest["manifest_version"], 3)
         self.assertTrue(
-            {"media-list.list.v1", "remote-stream.list.v1", "remote-stream.play.v1"}
+            {
+                "media-list.list.v1",
+                "media-list.list.v2",
+                "remote-stream.list.v1",
+                "remote-stream.list.v2",
+                "remote-stream.play.v1",
+            }
             <= {item["id"] for item in manifest["capabilities"]}
         )
         self.assertEqual(
@@ -398,6 +443,24 @@ printf '%s\n' '{"record_type":"item","provider_id":"video-1","rank":1,"display_t
         self.assertEqual(rows[1]["kind"], "remote_stream")
         self.assertEqual(rows[1]["source_url"], "https://video.example/watch?v=1")
 
+        source = addon.read_text(encoding="utf-8")
+        windows_source = (
+            ROOT
+            / "addons"
+            / "org.ersatzrs.addon.yt-dlp"
+            / "libexec"
+            / "youtube-list.ps1"
+        ).read_text(encoding="utf-8")
+        for token in ["other_video", "music_video", "movie", "television_episode", "auto"]:
+            self.assertIn(token, source)
+            self.assertIn(token, windows_source)
+        for keyword in ["reclame", "muziek", "speelfilm"]:
+            self.assertIn(keyword, source)
+            self.assertIn(keyword, windows_source)
+        self.assertIn("webpage_url,original_url,url", source)
+        self.assertIn("--output-na-placeholder null", source)
+        self.assertIn("AvailabilityReason", windows_source)
+
     def test_windows_beeldengeluid_declares_shared_list_contract(self) -> None:
         entrypoint_batch_source = (
             ROOT
@@ -430,7 +493,10 @@ printf '%s\n' '{"record_type":"item","provider_id":"video-1","rank":1,"display_t
         self.assertIn("name = $listName", source)
         self.assertIn("isPlayable", source)
         self.assertIn("$seen.Add($path)", source)
-        self.assertIn("skipped {0} unavailable Schatkamer shared-list item(s)", source)
+        self.assertIn("retained {0} unavailable Schatkamer shared-list item(s)", source)
+        self.assertIn("availability_reason = 'not_playable'", source)
+        self.assertIn("content_kind = 'auto'", source)
+        self.assertIn("$slug", source)
 
 
 if __name__ == "__main__":

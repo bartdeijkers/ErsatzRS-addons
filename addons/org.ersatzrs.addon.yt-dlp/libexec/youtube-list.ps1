@@ -1,5 +1,29 @@
 $ErrorActionPreference = 'Stop'
 
+function Availability([object]$entry) {
+    switch ([string]$entry.availability) {
+        { $_ -in @('public', 'unlisted') } { return $_ }
+        { $_ -in @('private', 'premium_only', 'subscriber_only', 'needs_auth') } { return $_ }
+        default { return 'unknown' }
+    }
+}
+
+function ContentKind([object]$entry) {
+    $text = (@($entry.categories) + @($entry.tags) + @([string]$entry.title) -join ' ').ToLowerInvariant()
+    if ($text -match 'advertisement|commercial|reclame') { return 'other_video' }
+    if ($text -match 'music video|videoclip|concert|music|muziek') { return 'music_video' }
+    if ($text -match 'movie|film|speelfilm') { return 'movie' }
+    if ($entry.episode -or $entry.series -or $entry.season_number) { return 'television_episode' }
+    return 'auto'
+}
+
+function AvailabilityReason([object]$entry) {
+    if ([string]$entry.availability -in @(
+        'private', 'premium_only', 'subscriber_only', 'needs_auth'
+    )) { return 'not_playable' }
+    return $null
+}
+
 try {
     $uri = [Uri]$env:PLAYLIST_URL
     if ($uri.Scheme -notin @('http', 'https')) { throw 'playlist URL must use HTTP or HTTPS' }
@@ -17,16 +41,21 @@ try {
         $rank = 0
         foreach ($entry in $entries) {
             $url = if ($entry.webpage_url) { [string]$entry.webpage_url } elseif ($entry.url) { [string]$entry.url } else { continue }
-            [ordered]@{
+            $row = [ordered]@{
                 record_type = 'item'
                 provider_id = [string]$entry.id
                 rank = $rank
                 display_title = [string]$entry.title
                 title = [string]$entry.title
                 kind = 'remote_stream'
-                guids = @()
+                guids = @('yt-dlp://' + [string]$entry.id)
                 source_url = $url
-            } | ConvertTo-Json -Depth 2 -Compress
+                availability = Availability $entry
+                content_kind = ContentKind $entry
+            }
+            $reason = AvailabilityReason $entry
+            if ($reason) { $row.availability_reason = $reason }
+            $row | ConvertTo-Json -Depth 2 -Compress
             $rank++
         }
     } else {
@@ -34,10 +63,20 @@ try {
             $url = if ($entry.webpage_url) { [string]$entry.webpage_url } elseif ($entry.url) { [string]$entry.url } else { continue }
             $row = [ordered]@{
                 id = [string]$entry.id
+                provider_id = [string]$entry.id
                 url = $url
                 title = [string]$entry.title
+                plot = if ($entry.description) { [string]$entry.description } else { $null }
+                genres = @($entry.categories)
+                tags = @($entry.tags)
+                thumbnail_url = if ($entry.thumbnail) { [string]$entry.thumbnail } else { $null }
+                availability = Availability $entry
+                content_kind = ContentKind $entry
+                guids = @('yt-dlp://' + [string]$entry.id)
                 is_live = $false
             }
+            $reason = AvailabilityReason $entry
+            if ($reason) { $row.availability_reason = $reason }
             if ($null -ne $entry.duration) { $row.duration_seconds = [uint64]$entry.duration }
             $row | ConvertTo-Json -Compress
         }

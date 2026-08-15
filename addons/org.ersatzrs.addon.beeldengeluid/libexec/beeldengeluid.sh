@@ -207,17 +207,16 @@ discover_shared_list_paths() {
             continue
         fi
         printf '%s\n' "$episode_path" >>"$list_work_dir/seen-all.txt"
-        if [ "$state" = playable ]; then
-            printf '%s\n' "$episode_path" >>"$list_work_dir/seen.txt"
-        else
+        printf '%s\n' "$episode_path" >>"$list_work_dir/seen.txt"
+        if [ "$state" != playable ]; then
             unavailable_count=$((unavailable_count + 1))
         fi
     done <"$list_work_dir/list-entries.txt"
 
     [ -s "$list_work_dir/seen.txt" ] \
-        || fail "the Schatkamer shared list did not contain playable episodes"
+        || fail "the Schatkamer shared list did not contain episodes"
     if [ "$unavailable_count" -gt 0 ]; then
-        printf 'beeldengeluid.sh: skipped %s unavailable Schatkamer shared-list item(s)\n' \
+        printf 'beeldengeluid.sh: retained %s unavailable Schatkamer shared-list item(s)\n' \
             "$unavailable_count" >&2
     fi
 }
@@ -297,14 +296,39 @@ list_playlist() {
     while IFS= read -r episode_path; do
         episode_id=${episode_path##*/}
         episode_url="https://schatkamer.beeldengeluid.nl$episode_path"
-        "$curl_bin" --fail --silent --show-error --location \
-            --output "$list_work_dir/episode.html" "$episode_url" \
-            || fail "a Schatkamer episode metadata request failed"
+        availability=available
+        availability_reason=
+        if [ "$source_kind" = shared_list ] \
+            && grep -Fqx "unavailable|$episode_path" "$list_work_dir/list-entries.txt"; then
+            availability=unavailable
+            availability_reason=not_playable
+        fi
+        if ! "$curl_bin" --fail --silent --show-error --location \
+            --output "$list_work_dir/episode.html" "$episode_url"; then
+            if [ "$availability" != unavailable ]; then
+                fail "a Schatkamer episode metadata request failed"
+            fi
+            episode_slug=$(printf '%s' "$episode_path" \
+                | sed -n 's|^/serie/[0-9][0-9]*/\([^/]*\)/aflevering/[0-9][0-9]*$|\1|p' \
+                | sed 's/[-_]/ /g')
+            title=$(printf '%s' "${episode_slug:-$episode_id}" | json_escape)
+            if [ "$output_mode" = media-list ]; then
+                printf '%s\n' \
+                    "{\"record_type\":\"item\",\"provider_id\":\"episode:$episode_id\",\"rank\":$rank,\"display_title\":\"$title\",\"title\":\"$title\",\"kind\":\"remote_stream\",\"guids\":[\"beeldengeluid://$episode_id\"],\"source_url\":\"$episode_url\",\"availability\":\"unavailable\",\"availability_reason\":\"not_playable\",\"content_kind\":\"auto\"}" \
+                    >>"$list_work_dir/media-list.ndjson"
+                rank=$((rank + 1))
+            else
+                printf '%s\n' \
+                    "{\"id\":\"$episode_id\",\"provider_id\":\"episode:$episode_id\",\"url\":\"$episode_url\",\"title\":\"$title\",\"availability\":\"unavailable\",\"availability_reason\":\"not_playable\",\"content_kind\":\"auto\",\"guids\":[\"beeldengeluid://$episode_id\"],\"is_live\":false}"
+            fi
+            continue
+        fi
         series_title=$(grep -o '<h1[^>]*>[^<]*' "$list_work_dir/episode.html" \
             | sed -n '1{s/^.*>//;p;}')
         episode_title=$(grep -o '<h3[^>]*>[^<]*' "$list_work_dir/episode.html" \
             | sed -n '1{s/^.*>//;p;}')
         [ -n "$episode_title" ] || episode_title=$episode_id
+        series_json=$(printf '%s' "$series_title" | html_decode | json_escape)
         if [ -n "$series_title" ]; then
             title="$series_title - $episode_title"
         else
@@ -375,10 +399,26 @@ list_playlist() {
         json_object_names broadcasters url \
             "$list_work_dir/episode.html" >"$list_work_dir/broadcasters.txt" || true
 
+        content_kind=other_video
+        if grep -Eiq 'reclame|commercial|advertentie' \
+            "$list_work_dir/genres.txt" "$list_work_dir/subjects.txt"; then
+            content_kind=other_video
+        elif grep -Eiq 'muziek|music|concert|videoclip|music video' \
+            "$list_work_dir/genres.txt" "$list_work_dir/subjects.txt"; then
+            content_kind=music_video
+        elif grep -Eiq 'speelfilm|film|movie' \
+            "$list_work_dir/genres.txt" "$list_work_dir/subjects.txt"; then
+            content_kind=movie
+        elif [ -n "$series_title" ]; then
+            content_kind=television_episode
+        fi
+
         if [ "$output_mode" = media-list ]; then
-            printf '{"record_type":"item","provider_id":"episode:%s","rank":%s,"display_title":"%s","title":"%s","kind":"remote_stream","guids":[],"source_url":"%s"' \
-                "$episode_id" "$rank" "$title" "$title" "$episode_url" \
+            printf '{"record_type":"item","provider_id":"episode:%s","rank":%s,"display_title":"%s","title":"%s","kind":"remote_stream","guids":["beeldengeluid://%s"],"source_url":"%s","availability":"%s","content_kind":"%s"' \
+                "$episode_id" "$rank" "$title" "$title" "$episode_id" "$episode_url" "$availability" "$content_kind" \
                 >>"$list_work_dir/media-list.ndjson"
+            [ -z "$availability_reason" ] \
+                || printf ',"availability_reason":"%s"' "$availability_reason" >>"$list_work_dir/media-list.ndjson"
             [ -z "$year" ] \
                 || printf ',"year":%s' "$year" >>"$list_work_dir/media-list.ndjson"
             printf '}\n' >>"$list_work_dir/media-list.ndjson"
@@ -386,8 +426,11 @@ list_playlist() {
             continue
         fi
 
-        printf '{"id":"%s","url":"%s","title":"%s"' \
-            "$episode_id" "$episode_url" "$title"
+        printf '{"id":"%s","provider_id":"episode:%s","url":"%s","title":"%s","availability":"%s","content_kind":"%s","guids":["beeldengeluid://%s"]' \
+            "$episode_id" "$episode_id" "$episode_url" "$title" "$availability" "$content_kind" "$episode_id"
+        [ -z "$availability_reason" ] \
+            || printf ',"availability_reason":"%s"' "$availability_reason"
+        [ -z "$series_json" ] || printf ',"show_title":"%s"' "$series_json"
         [ -z "$duration_seconds" ] \
             || printf ',"duration_seconds":%s' "$duration_seconds"
         [ -z "$plot" ] || printf ',"plot":"%s"' "$plot"

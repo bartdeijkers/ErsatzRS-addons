@@ -10,6 +10,25 @@ have_program() {
     [ -x "$1" ] || command -v "$1" >/dev/null 2>&1
 }
 
+enumerate_playlist() {
+    output_template=$1
+    playlist_url=$2
+    exec "$yt_dlp" \
+        --no-config \
+        --no-update \
+        --quiet \
+        --flat-playlist \
+        --output-na-placeholder null \
+        --parse-metadata '%(series&ERSATZRS_TV|)s %(episode&ERSATZRS_TV|)s %(track&ERSATZRS_MUSIC|)s %(artist&ERSATZRS_MUSIC|)s %(categories)l %(tags)l %(title)s:%(ersatzrs_content_kind)s' \
+        --replace-in-metadata ersatzrs_content_kind '(?i).*(advertisement|commercial|reclame).*' other_video \
+        --replace-in-metadata ersatzrs_content_kind '(?i).*(ERSATZRS_MUSIC|music video|videoclip|concert|music|muziek).*' music_video \
+        --replace-in-metadata ersatzrs_content_kind '(?i).*(movie|film|speelfilm).*' movie \
+        --replace-in-metadata ersatzrs_content_kind '(?i).*ERSATZRS_TV.*' television_episode \
+        --replace-in-metadata ersatzrs_content_kind '^(?!(other_video|music_video|movie|television_episode)$).*$' auto \
+        --print "$output_template" \
+        "$playlist_url"
+}
+
 case "$operation" in
     check)
         if ! have_program "$yt_dlp" || ! have_program "$FFMPEG_BIN"; then
@@ -30,20 +49,12 @@ case "$operation" in
         esac
         if [ -n "${ERSATZRS_MEDIA_LIST_URL:-}" ]; then
             printf '%s\n' "{\"record_type\":\"list\",\"provider_id\":\"$playlist_url\",\"name\":\"yt-dlp playlist\",\"description\":\"Remote videos selected by the supplied playlist link.\"}"
-            exec "$yt_dlp" \
-                --no-config \
-                --no-update \
-                --quiet \
-                --flat-playlist \
-                --print '{"record_type":"item","provider_id":%(id)j,"rank":%(playlist_autonumber)d,"display_title":%(title)j,"title":%(title)j,"kind":"remote_stream","guids":[],"source_url":%(webpage_url)j}' \
+            enumerate_playlist \
+                '{"record_type":"item","provider_id":%(id)j,"rank":%(playlist_autonumber)d,"display_title":%(title)j,"title":%(title)j,"kind":"remote_stream","guids":["yt-dlp://%(id)s"],"source_url":%(webpage_url,original_url,url)j,"availability":%(availability)j,"content_kind":%(ersatzrs_content_kind)j}' \
                 "$playlist_url"
         fi
-        exec "$yt_dlp" \
-            --no-config \
-            --no-update \
-            --quiet \
-            --flat-playlist \
-            --print '{"id":%(id)j,"url":%(webpage_url)j,"title":%(title)j,"duration_seconds":%(duration)j,"is_live":false}' \
+        enumerate_playlist \
+            '{"id":%(id)j,"provider_id":%(id)j,"url":%(webpage_url,original_url,url)j,"title":%(title)j,"plot":%(description)j,"duration_seconds":%(duration)j,"year":%(release_year)j,"genres":%(categories)j,"tags":%(tags)j,"thumbnail_url":%(thumbnail)j,"availability":%(availability)j,"content_kind":%(ersatzrs_content_kind)j,"guids":["yt-dlp://%(id)s"],"is_live":false}' \
             "$playlist_url"
         ;;
     play)

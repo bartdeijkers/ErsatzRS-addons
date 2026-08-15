@@ -12,21 +12,14 @@ The repository contains:
   Stream and media-list paths do not require Python or yt-dlp.
 - `org.ersatzrs.addon.yt-dlp`: streams a remote video through an
   operator-installed yt-dlp and the ErsatzRS-managed FFmpeg runtime.
-- `org.ersatzrs.addon.trakt`: imports public Trakt lists through the
-  provider-neutral media-list contract, with its client ID resolved only from
-  an environment or file secret reference.
 
 The two streaming add-ons send video straight to ErsatzRS for immediate
 playback; no permanent file is written.
 
-Package contracts are owned by the `ersatzrs-addon-contract` crate in the
-[ErsatzRS repository](https://github.com/bartdeijkers/ErsatzRS). Rust add-ons
-pin the full commit behind an immutable `addon-contract-v<version>` tag; the
-contract is not consumed from a package registry, moving branch, or local path.
 Each package keeps its runtime self-contained below `addons/<id>/`. Python is
 used only by repository build and test tooling; it is not an add-on runtime
-dependency. The Trakt adapter is a native Rust executable, while Beeld & Geluid
-enumeration and playback remain implemented directly for POSIX and Windows.
+dependency. Beeld & Geluid enumeration and playback are implemented directly
+for POSIX and Windows.
 
 ## Build the unsigned repository
 
@@ -36,8 +29,7 @@ Python 3.11 or newer is required only for release tooling:
 python3 tools/build_repository.py \
   --sequence 1 \
   --base-url https://bartdeijkers.github.io/ErsatzRS-addons \
-  --output dist \
-  --native-artifacts native-artifacts
+  --output dist
 ```
 
 This creates deterministic ZIP packages, bounded PNG icon assets, and the exact
@@ -58,16 +50,12 @@ the default repository is visible but intentionally cannot refresh.
 Run the source-level checks without contacting provider services:
 
 ```sh
-cargo fmt --manifest-path native/trakt/Cargo.toml -- --check
-cargo test --locked --manifest-path native/trakt/Cargo.toml
-cargo clippy --locked --manifest-path native/trakt/Cargo.toml --all-targets -- -D warnings
 python3 -m unittest discover -s tests
 ```
 
-A complete unsigned repository build additionally needs the six native Trakt
-binaries staged below `native-artifacts/org.ersatzrs.addon.trakt/bin/<rid>/`.
-The publishing workflow builds those binaries for every supported ErsatzRS RID
-before packaging and signing the repository.
+A complete unsigned repository build needs no native artifacts. The publishing
+workflow validates the package sources before packaging and signing the
+repository.
 
 Live playback tests require authorized provider access and the external tools
 declared by each manifest. Do not place credentials, cookies, private media

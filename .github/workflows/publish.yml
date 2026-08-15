@@ -17,119 +17,13 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build-trakt-linux:
-    runs-on: ubuntu-22.04
-    strategy:
-      matrix:
-        include:
-          - rid: linux-x64
-            target: x86_64-unknown-linux-gnu
-            cross_package: ""
-          - rid: linux-arm64
-            target: aarch64-unknown-linux-gnu
-            cross_package: gcc-aarch64-linux-gnu
-          - rid: linux-arm
-            target: armv7-unknown-linux-gnueabihf
-            cross_package: gcc-arm-linux-gnueabihf
-    steps:
-      - uses: actions/checkout@v7
-      - name: Install Rust target
-        run: rustup target add "${{ matrix.target }}"
-      - name: Install cross compiler
-        if: matrix.cross_package != ''
-        run: sudo apt-get update && sudo apt-get install -y "${{ matrix.cross_package }}"
-      - name: Test and lint native Trakt add-on
-        if: matrix.rid == 'linux-x64'
-        run: |
-          cargo fmt --manifest-path native/trakt/Cargo.toml -- --check
-          cargo test --locked --manifest-path native/trakt/Cargo.toml
-          cargo clippy --locked --manifest-path native/trakt/Cargo.toml --all-targets -- -D warnings
-      - name: Build native Trakt add-on
-        shell: bash
-        run: |
-          case "${{ matrix.rid }}" in
-            linux-arm64)
-              export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
-              export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc
-              ;;
-            linux-arm)
-              export CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER=arm-linux-gnueabihf-gcc
-              export CC_armv7_unknown_linux_gnueabihf=arm-linux-gnueabihf-gcc
-              ;;
-          esac
-          cargo build --locked --release --manifest-path native/trakt/Cargo.toml --target "${{ matrix.target }}"
-          destination="native-artifacts/org.ersatzrs.addon.trakt/bin/${{ matrix.rid }}"
-          mkdir -p "$destination"
-          cp "native/trakt/target/${{ matrix.target }}/release/ersatzrs-trakt-addon" "$destination/ersatzrs-trakt-addon"
-      - name: Smoke-test native Trakt add-on
-        if: matrix.rid == 'linux-x64'
-        env:
-          ERSATZRS_ADDON_SECRET_CLIENT_ID: fixture
-        run: native-artifacts/org.ersatzrs.addon.trakt/bin/linux-x64/ersatzrs-trakt-addon check
-      - uses: actions/upload-artifact@v7
-        with:
-          name: trakt-${{ matrix.rid }}
-          path: native-artifacts
-
-  build-trakt-macos:
-    runs-on: macos-14
-    strategy:
-      matrix:
-        include:
-          - rid: osx-x64
-            target: x86_64-apple-darwin
-          - rid: osx-arm64
-            target: aarch64-apple-darwin
-    steps:
-      - uses: actions/checkout@v7
-      - name: Install Rust target
-        run: rustup target add "${{ matrix.target }}"
-      - name: Build native Trakt add-on
-        run: |
-          cargo build --locked --release --manifest-path native/trakt/Cargo.toml --target "${{ matrix.target }}"
-          destination="native-artifacts/org.ersatzrs.addon.trakt/bin/${{ matrix.rid }}"
-          mkdir -p "$destination"
-          cp "native/trakt/target/${{ matrix.target }}/release/ersatzrs-trakt-addon" "$destination/ersatzrs-trakt-addon"
-      - uses: actions/upload-artifact@v7
-        with:
-          name: trakt-${{ matrix.rid }}
-          path: native-artifacts
-
-  build-trakt-windows:
-    runs-on: windows-2022
-    steps:
-      - uses: actions/checkout@v7
-      - name: Build native Trakt add-on
-        run: cargo build --locked --release --manifest-path native/trakt/Cargo.toml --target x86_64-pc-windows-msvc
-      - name: Stage native Trakt add-on
-        shell: pwsh
-        run: |
-          $destination = "native-artifacts/org.ersatzrs.addon.trakt/bin/win-x64"
-          New-Item -ItemType Directory -Force -Path $destination | Out-Null
-          Copy-Item "native/trakt/target/x86_64-pc-windows-msvc/release/ersatzrs-trakt-addon.exe" "$destination/ersatzrs-trakt-addon.exe"
-      - name: Smoke-test native Trakt add-on
-        shell: pwsh
-        env:
-          ERSATZRS_ADDON_SECRET_CLIENT_ID: fixture
-        run: native-artifacts/org.ersatzrs.addon.trakt/bin/win-x64/ersatzrs-trakt-addon.exe check
-      - uses: actions/upload-artifact@v7
-        with:
-          name: trakt-win-x64
-          path: native-artifacts
-
   publish:
-    needs: [build-trakt-linux, build-trakt-macos, build-trakt-windows]
     runs-on: ubuntu-latest
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v8
-        with:
-          pattern: trakt-*
-          path: native-artifacts
-          merge-multiple: true
       - name: Test repository tooling and entrypoints
         run: python3 -m unittest discover -s tests
       - name: Build packages and unsigned index
@@ -138,7 +32,6 @@ jobs:
           --sequence "${GITHUB_RUN_NUMBER}"
           --base-url https://bartdeijkers.github.io/ErsatzRS-addons
           --output dist
-          --native-artifacts native-artifacts
       - name: Sign exact catalog bytes
         env:
           SIGNING_KEY_PEM: ${{ secrets.ADDON_REPOSITORY_SIGNING_KEY_PEM }}

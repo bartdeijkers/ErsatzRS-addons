@@ -17,19 +17,6 @@ assert SPEC.loader is not None
 SPEC.loader.exec_module(BUILD_REPOSITORY)
 
 class RepositoryTests(unittest.TestCase):
-    def test_native_contract_dependency_is_an_exact_github_revision(self) -> None:
-        manifest = BUILD_REPOSITORY.tomllib.loads(
-            (ROOT / "native" / "trakt" / "Cargo.toml").read_text(encoding="utf-8")
-        )
-        dependency = manifest["dependencies"]["ersatzrs-addon-contract"]
-        self.assertEqual(
-            dependency,
-            {
-                "git": "https://github.com/bartdeijkers/ErsatzRS",
-                "rev": "453dddf054aeae27d1959e263bd5288121ab1eab",
-            },
-        )
-
     def final_operation_error(self, result: subprocess.CompletedProcess[str]) -> dict[str, str]:
         self.assertNotEqual(result.returncode, 0)
         payload = json.loads(result.stderr.splitlines()[-1])
@@ -37,17 +24,6 @@ class RepositoryTests(unittest.TestCase):
         self.assertTrue(payload["code"])
         self.assertTrue(payload["message"])
         return payload
-
-    def write_native_artifacts(self, root: pathlib.Path) -> None:
-        manifest = BUILD_REPOSITORY.tomllib.loads(
-            (ROOT / "addons" / "org.ersatzrs.addon.trakt" / "addon.toml").read_text(
-                encoding="utf-8"
-            )
-        )
-        for entrypoint in manifest["entrypoints"].values():
-            destination = root / manifest["id"] / entrypoint["path"]
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            destination.write_bytes(b"fixture native executable")
 
     def run_posix_beeldengeluid_list(
         self,
@@ -133,27 +109,30 @@ cp "$source_file" "$output"
         with (
             tempfile.TemporaryDirectory() as first,
             tempfile.TemporaryDirectory() as second,
-            tempfile.TemporaryDirectory() as artifacts,
         ):
-            artifact_root = pathlib.Path(artifacts)
-            self.write_native_artifacts(artifact_root)
             BUILD_REPOSITORY.build(
-                ROOT, pathlib.Path(first), 7, "https://example.test/addons", generated, artifact_root
+                ROOT, pathlib.Path(first), 7, "https://example.test/addons", generated
             )
             BUILD_REPOSITORY.build(
-                ROOT, pathlib.Path(second), 7, "https://example.test/addons", generated, artifact_root
+                ROOT, pathlib.Path(second), 7, "https://example.test/addons", generated
             )
             first_index = pathlib.Path(first, "index-v1.json").read_bytes()
             self.assertEqual(first_index, pathlib.Path(second, "index-v1.json").read_bytes())
             index = json.loads(first_index)
             self.assertEqual(index["schema_version"], 2)
             self.assertEqual(index["repository_id"], "org.ersatzrs.addons.official")
-            self.assertEqual(len(index["addons"]), 3)
+            self.assertEqual(
+                {addon["id"] for addon in index["addons"]},
+                {
+                    "org.ersatzrs.addon.beeldengeluid",
+                    "org.ersatzrs.addon.yt-dlp",
+                },
+            )
             for addon in index["addons"]:
                 self.assertEqual(addon["license"], "Zlib")
-                if addon["id"] != "org.ersatzrs.addon.trakt":
-                    self.assertIn("stream", addon["summary"]["en-US"].lower())
+                self.assertIn("stream", addon["summary"]["en-US"].lower())
                 self.assertEqual(addon["dependencies"], [])
+                self.assertEqual(set(addon["packages"]), {"any"})
                 if "icon" in addon:
                     icon = addon["icon"]
                     icon_filename = icon["url"].rsplit("/", 1)[1]
@@ -175,18 +154,6 @@ cp "$source_file" "$output"
                         for batch_file in batch_files:
                             batch_contents = archive.read(batch_file)
                             self.assertNotIn(b"\n", batch_contents.replace(b"\r\n", b""))
-                        if addon["id"] == "org.ersatzrs.addon.trakt":
-                            executable = "ersatzrs-trakt-addon.exe" if rid == "win-x64" else "ersatzrs-trakt-addon"
-                            self.assertIn(f"bin/{rid}/{executable}", archive.namelist())
-                            self.assertNotIn("trakt.py", archive.namelist())
-
-            trakt = next(
-                addon for addon in index["addons"] if addon["id"] == "org.ersatzrs.addon.trakt"
-            )
-            self.assertIn("media-list.list.v1", trakt["capabilities"])
-            self.assertEqual(set(trakt["packages"]), BUILD_REPOSITORY.SUPPORTED_RIDS - {"any"})
-            self.assertEqual(trakt["permissions"]["external_commands"], [])
-
             beeldengeluid = next(
                 addon
                 for addon in index["addons"]
@@ -228,24 +195,6 @@ cp "$source_file" "$output"
             contents = (addon_root / relative_path).read_text(encoding="utf-8")
             self.assertNotIn("ERSATZRS_ADDON_SETTING_ACTION_ID", contents)
             self.assertNotIn("BEELDENGELUID_ACTION_ID", contents)
-
-    def test_trakt_manifest_suggests_only_a_secret_reference_name(self) -> None:
-        manifest = BUILD_REPOSITORY.tomllib.loads(
-            (ROOT / "addons" / "org.ersatzrs.addon.trakt" / "addon.toml").read_text(
-                encoding="utf-8"
-            )
-        )
-        client_id = next(setting for setting in manifest["settings"] if setting["key"] == "CLIENT_ID")
-        self.assertEqual([setting["key"] for setting in manifest["settings"]], ["CLIENT_ID"])
-        self.assertTrue(
-            all(entrypoint["kind"] == "native" for entrypoint in manifest["entrypoints"].values())
-        )
-        self.assertEqual(client_id["kind"], "secret_reference")
-        self.assertNotIn("default", client_id)
-        self.assertEqual(
-            client_id["suggested_reference"],
-            {"kind": "environment", "reference": "TRAKT__CLIENTID"},
-        )
 
     @unittest.skipUnless(pathlib.Path("/bin/sh").exists(), "POSIX shell required")
     def test_posix_readiness_contracts_emit_one_json_object(self) -> None:

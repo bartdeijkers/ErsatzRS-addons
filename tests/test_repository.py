@@ -17,6 +17,27 @@ assert SPEC.loader is not None
 SPEC.loader.exec_module(BUILD_REPOSITORY)
 
 class RepositoryTests(unittest.TestCase):
+    def test_native_contract_dependency_is_an_exact_github_revision(self) -> None:
+        manifest = BUILD_REPOSITORY.tomllib.loads(
+            (ROOT / "native" / "trakt" / "Cargo.toml").read_text(encoding="utf-8")
+        )
+        dependency = manifest["dependencies"]["ersatzrs-addon-contract"]
+        self.assertEqual(
+            dependency,
+            {
+                "git": "https://github.com/bartdeijkers/ErsatzRS",
+                "rev": "453dddf054aeae27d1959e263bd5288121ab1eab",
+            },
+        )
+
+    def final_operation_error(self, result: subprocess.CompletedProcess[str]) -> dict[str, str]:
+        self.assertNotEqual(result.returncode, 0)
+        payload = json.loads(result.stderr.splitlines()[-1])
+        self.assertEqual(set(payload), {"code", "message"})
+        self.assertTrue(payload["code"])
+        self.assertTrue(payload["message"])
+        return payload
+
     def write_native_artifacts(self, root: pathlib.Path) -> None:
         manifest = BUILD_REPOSITORY.tomllib.loads(
             (ROOT / "addons" / "org.ersatzrs.addon.trakt" / "addon.toml").read_text(
@@ -248,6 +269,48 @@ cp "$source_file" "$output"
             self.assertEqual(result.stderr, "")
 
     @unittest.skipUnless(pathlib.Path("/bin/sh").exists(), "POSIX shell required")
+    def test_posix_operations_emit_structured_final_stderr_lines(self) -> None:
+        for addon_id, extra in [
+            ("org.ersatzrs.addon.beeldengeluid", {"ERSATZRS_ADDON_SETTING_CURL_BIN": "/bin/true"}),
+            ("org.ersatzrs.addon.yt-dlp", {"ERSATZRS_ADDON_SETTING_YT_DLP_BIN": "/bin/true"}),
+        ]:
+            result = subprocess.run(
+                ["/bin/sh", str(ROOT / "addons" / addon_id / "addon.sh"), "list"],
+                check=False,
+                capture_output=True,
+                text=True,
+                env={"PATH": "/usr/bin:/bin", "FFMPEG_BIN": "/bin/true", **extra},
+            )
+            self.assertEqual(self.final_operation_error(result)["code"], "missing-setting")
+
+        with tempfile.TemporaryDirectory() as temporary:
+            fake = pathlib.Path(temporary) / "yt-dlp"
+            fake.write_text("#!/bin/sh\necho provider prose >&2\nexit 23\n", encoding="utf-8")
+            fake.chmod(0o755)
+            result = subprocess.run(
+                ["/bin/sh", str(ROOT / "addons" / "org.ersatzrs.addon.yt-dlp" / "addon.sh"), "list"],
+                check=False,
+                capture_output=True,
+                text=True,
+                env={
+                    "PATH": "/usr/bin:/bin",
+                    "FFMPEG_BIN": "/bin/true",
+                    "ERSATZRS_ADDON_SETTING_YT_DLP_BIN": str(fake),
+                    "ERSATZRS_MEDIA_LIST_URL": "https://video.example/playlist",
+                },
+            )
+        self.assertEqual(self.final_operation_error(result)["code"], "provider-unreachable")
+
+    def test_windows_entrypoints_declare_structured_operation_codes(self) -> None:
+        for addon_id in [
+            "org.ersatzrs.addon.beeldengeluid",
+            "org.ersatzrs.addon.yt-dlp",
+        ]:
+            source = (ROOT / "addons" / addon_id / "addon.bat").read_text(encoding="utf-8")
+            for code in ["missing-setting", "provider-unreachable", "operation-failed"]:
+                self.assertIn(code, source)
+
+    @unittest.skipUnless(pathlib.Path("/bin/sh").exists(), "POSIX shell required")
     def test_posix_beeldengeluid_names_a_shared_list_after_the_list_itself(self) -> None:
         shared_page = (
             r'<script>\"title\":\"Teleac \u0026 Friends\",\"description\":\"Gedeelde lijst\",'
@@ -338,6 +401,7 @@ cp "$source_file" "$output"
         )
         self.assertNotEqual(private.returncode, 0)
         self.assertIn("unavailable or private", private.stderr)
+        self.assertEqual(self.final_operation_error(private)["code"], "provider-unreachable")
 
         invalid = self.run_posix_beeldengeluid_list(
             "https://schatkamer.beeldengeluid.nl/lijst/not-a-uuid",
@@ -345,6 +409,7 @@ cp "$source_file" "$output"
         )
         self.assertEqual(invalid.returncode, 64)
         self.assertIn("must be a UUID", invalid.stderr)
+        self.assertEqual(self.final_operation_error(invalid)["code"], "provider-unreachable")
 
     @unittest.skipUnless(pathlib.Path("/bin/sh").exists(), "POSIX shell required")
     def test_posix_beeldengeluid_retains_series_enumeration(self) -> None:
@@ -418,8 +483,10 @@ cp "$source_file" "$output"
         addon = ROOT / "addons" / "org.ersatzrs.addon.yt-dlp" / "addon.sh"
         with tempfile.TemporaryDirectory() as temporary:
             fake = pathlib.Path(temporary) / "yt-dlp"
+            arguments = pathlib.Path(temporary) / "arguments.txt"
             fake.write_text(
                 """#!/bin/sh
+printf '%s\n' "$@" > "$FAKE_ARGUMENTS"
 printf '%s\n' '{"record_type":"item","provider_id":"video-1","rank":1,"display_title":"Fixture","title":"Fixture","kind":"remote_stream","guids":[],"source_url":"https://video.example/watch?v=1"}'
 """,
                 encoding="utf-8",
@@ -435,8 +502,10 @@ printf '%s\n' '{"record_type":"item","provider_id":"video-1","rank":1,"display_t
                     "FFMPEG_BIN": "/bin/true",
                     "ERSATZRS_ADDON_SETTING_YT_DLP_BIN": str(fake),
                     "ERSATZRS_MEDIA_LIST_URL": "https://video.example/playlist?id=fixture",
+                    "FAKE_ARGUMENTS": str(arguments),
                 },
             )
+            yt_dlp_arguments = arguments.read_text(encoding="utf-8")
         self.assertEqual(result.returncode, 0, result.stderr)
         rows = [json.loads(line) for line in result.stdout.splitlines()]
         self.assertEqual(rows[0]["record_type"], "list")
@@ -459,6 +528,52 @@ printf '%s\n' '{"record_type":"item","provider_id":"video-1","rank":1,"display_t
             self.assertIn(keyword, windows_source)
         self.assertIn("webpage_url,original_url,url", source)
         self.assertIn("--output-na-placeholder null", source)
+        self.assertIn("AvailabilityReason", windows_source)
+        self.assertEqual(
+            windows_source.count("Where-Object { $null -ne $_ }"),
+            2,
+        )
+        self.assertIn("genres = $genres", windows_source)
+        self.assertIn("tags = $tags", windows_source)
+        self.assertIn("%(ersatzrs_availability)j", yt_dlp_arguments)
+        self.assertNotIn("%(availability)j", yt_dlp_arguments)
+
+    def test_yt_dlp_normalizes_provider_availability_on_both_platforms(self) -> None:
+        source = (
+            ROOT / "addons" / "org.ersatzrs.addon.yt-dlp" / "addon.sh"
+        ).read_text(encoding="utf-8")
+        windows_source = (
+            ROOT
+            / "addons"
+            / "org.ersatzrs.addon.yt-dlp"
+            / "libexec"
+            / "youtube-list.ps1"
+        ).read_text(encoding="utf-8")
+        fixtures = [
+            ("public", "available"),
+            ("unlisted", "available"),
+            ("private", "unavailable"),
+            ("premium_only", "unavailable"),
+            ("subscriber_only", "unavailable"),
+            ("needs_auth", "unavailable"),
+            (None, "unknown"),
+            ("future_provider_value", "unknown"),
+        ]
+
+        for provider_token, canonical_token in fixtures:
+            with self.subTest(provider_token=provider_token):
+                if provider_token not in (None, "future_provider_value"):
+                    self.assertIn(provider_token, source)
+                    self.assertIn(provider_token, windows_source)
+                self.assertIn(canonical_token, source)
+                self.assertIn(f"return '{canonical_token}'", windows_source)
+
+        self.assertIn("%(availability|unknown)s", source)
+        self.assertIn("^(?!(available|unavailable|unknown)$).*$", source)
+        self.assertIn("return 'unknown'", windows_source)
+        self.assertIn('\"availability\":%(ersatzrs_availability)j', source)
+        self.assertNotIn('\"availability\":%(availability)j', source)
+        self.assertIn('ersatzrs_unavailable&\"not_playable\"|null', source)
         self.assertIn("AvailabilityReason", windows_source)
 
     def test_windows_beeldengeluid_declares_shared_list_contract(self) -> None:

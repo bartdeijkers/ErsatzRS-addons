@@ -2,8 +2,8 @@ $ErrorActionPreference = 'Stop'
 
 function Availability([object]$entry) {
     switch ([string]$entry.availability) {
-        { $_ -in @('public', 'unlisted') } { return $_ }
-        { $_ -in @('private', 'premium_only', 'subscriber_only', 'needs_auth') } { return $_ }
+        { $_ -in @('public', 'unlisted') } { return 'available' }
+        { $_ -in @('private', 'premium_only', 'subscriber_only', 'needs_auth') } { return 'unavailable' }
         default { return 'unknown' }
     }
 }
@@ -61,14 +61,16 @@ try {
     } else {
         foreach ($entry in $entries) {
             $url = if ($entry.webpage_url) { [string]$entry.webpage_url } elseif ($entry.url) { [string]$entry.url } else { continue }
+            $genres = @($entry.categories | Where-Object { $null -ne $_ })
+            $tags = @($entry.tags | Where-Object { $null -ne $_ })
             $row = [ordered]@{
                 id = [string]$entry.id
                 provider_id = [string]$entry.id
                 url = $url
                 title = [string]$entry.title
                 plot = if ($entry.description) { [string]$entry.description } else { $null }
-                genres = @($entry.categories)
-                tags = @($entry.tags)
+                genres = $genres
+                tags = $tags
                 thumbnail_url = if ($entry.thumbnail) { [string]$entry.thumbnail } else { $null }
                 availability = Availability $entry
                 content_kind = ContentKind $entry

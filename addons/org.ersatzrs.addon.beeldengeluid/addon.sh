@@ -12,6 +12,23 @@ have_program() {
     [ -x "$1" ] || command -v "$1" >/dev/null 2>&1
 }
 
+fail() {
+    code=$1
+    message=$2
+    status=${3:-70}
+    printf '{"code":"%s","message":"%s"}\n' "$code" "$message" >&2
+    exit "$status"
+}
+
+run_provider() {
+    if /bin/sh "$script_dir/libexec/beeldengeluid.sh" "$@"; then
+        return 0
+    else
+        status=$?
+        fail provider-unreachable "The media provider request failed." "$status"
+    fi
+}
+
 check() {
     for program in "$FFMPEG_BIN" "$curl_bin" awk grep dd sed mktemp; do
         if ! have_program "$program"; then
@@ -29,18 +46,18 @@ case "$operation" in
     list)
         if [ -n "${ERSATZRS_MEDIA_LIST_URL:-}" ]; then
             export BEELDENGELUID_OUTPUT=media-list
-            exec /bin/sh "$script_dir/libexec/beeldengeluid.sh" list "$ERSATZRS_MEDIA_LIST_URL"
+            run_provider list "$ERSATZRS_MEDIA_LIST_URL"
+            exit 0
         fi
-        : "${ERSATZRS_REMOTE_STREAM_PLAYLIST_URL:?playlist URL is required}"
-        exec /bin/sh "$script_dir/libexec/beeldengeluid.sh" list "$ERSATZRS_REMOTE_STREAM_PLAYLIST_URL"
+        [ -n "${ERSATZRS_REMOTE_STREAM_PLAYLIST_URL:-}" ] || fail missing-setting "A playlist URL is required." 64
+        run_provider list "$ERSATZRS_REMOTE_STREAM_PLAYLIST_URL"
         ;;
     play)
-        : "${ERSATZRS_REMOTE_STREAM_URL:?remote stream URL is required}"
+        [ -n "${ERSATZRS_REMOTE_STREAM_URL:-}" ] || fail missing-setting "A remote stream URL is required." 64
         seek=${ERSATZRS_REMOTE_STREAM_SEEK:-0}
-        exec /bin/sh "$script_dir/libexec/beeldengeluid.sh" play "$ERSATZRS_REMOTE_STREAM_URL" "$seek"
+        run_provider play "$ERSATZRS_REMOTE_STREAM_URL" "$seek"
         ;;
     *)
-        echo "unsupported add-on operation" >&2
-        exit 64
+        fail operation-failed "Unsupported add-on operation." 64
         ;;
 esac

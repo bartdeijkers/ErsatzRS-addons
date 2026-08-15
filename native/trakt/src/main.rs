@@ -5,9 +5,15 @@ use std::io::{self, Write};
 use std::process::ExitCode;
 use std::time::Duration;
 
+use ersatzrs_addon_contract::{
+    AddonCheckResult, AddonCheckStatus, AddonMediaListContentKind, AddonMediaListItemAvailability,
+    AddonMediaListItemKind, AddonMediaListRecord, AddonOperationError,
+};
 use reqwest::blocking::Client;
 use reqwest::header::{HeaderMap, ACCEPT};
-use serde_json::{json, Map, Value};
+use reqwest::StatusCode;
+use serde::Serialize;
+use serde_json::{Map, Value};
 use url::Url;
 
 const API_BASE: &str = "https://api.trakt.tv";
@@ -16,27 +22,37 @@ const MAX_PAGES: u32 = 100;
 #[derive(Debug)]
 struct AddonError {
     exit_code: u8,
+    code: &'static str,
     message: String,
 }
 
 impl AddonError {
-    fn new(exit_code: u8, message: impl Into<String>) -> Self {
+    fn new(exit_code: u8, code: &'static str, message: impl Into<String>) -> Self {
         Self {
             exit_code,
+            code,
             message: message.into(),
         }
     }
     fn usage(message: impl Into<String>) -> Self {
-        Self::new(64, message)
+        Self::new(64, "unsupported-url", message)
     }
     fn unavailable(message: impl Into<String>) -> Self {
-        Self::new(69, message)
+        Self::new(69, "provider-unreachable", message)
+    }
+    fn rejected(message: impl Into<String>) -> Self {
+        Self::new(69, "provider-rejected", message)
+    }
+    fn failed(message: impl Into<String>) -> Self {
+        Self::new(70, "operation-failed", message)
     }
 }
 
 impl Display for AddonError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(&self.message)
+        let diagnostic = AddonOperationError::new(self.code, &self.message);
+        let json = serde_json::to_string(&diagnostic).map_err(|_| std::fmt::Error)?;
+        formatter.write_str(&json)
     }
 }
 
@@ -74,13 +90,27 @@ impl TraktApi for HttpTraktApi {
             .header("trakt-api-version", "2")
             .header("trakt-api-key", &self.client_id)
             .send()
-            .and_then(reqwest::blocking::Response::error_for_status)
             .map_err(|error| {
-                AddonError::unavailable(format!("Trakt HTTP request failed: {error}"))
+                AddonError::unavailable(format!("Provider request failed: {error}"))
             })?;
+        if !response.status().is_success() {
+            let status = response.status();
+            let code = if status == StatusCode::TOO_MANY_REQUESTS {
+                "provider-rate-limited"
+            } else if status == StatusCode::NOT_FOUND {
+                "not-found"
+            } else {
+                "provider-rejected"
+            };
+            return Err(AddonError::new(
+                69,
+                code,
+                format!("Provider returned HTTP {status}"),
+            ));
+        }
         let page_count = page_count(response.headers());
         let body = response.json().map_err(|error| {
-            AddonError::unavailable(format!("Trakt JSON response failed: {error}"))
+            AddonError::rejected(format!("Provider returned invalid JSON: {error}"))
         })?;
         Ok(ApiResponse { body, page_count })
     }
@@ -147,12 +177,12 @@ fn client_id() -> String {
         .unwrap_or_default()
 }
 
-fn emit(output: &mut impl Write, value: &Value) -> Result<(), AddonError> {
+fn emit(output: &mut impl Write, value: &impl Serialize) -> Result<(), AddonError> {
     serde_json::to_writer(&mut *output, value)
-        .map_err(|error| AddonError::unavailable(format!("JSON output failed: {error}")))?;
+        .map_err(|error| AddonError::failed(format!("JSON output failed: {error}")))?;
     output
         .write_all(b"\n")
-        .map_err(|error| AddonError::unavailable(format!("output failed: {error}")))
+        .map_err(|error| AddonError::failed(format!("output failed: {error}")))
 }
 
 fn text(value: &Value) -> Option<String> {
@@ -174,7 +204,7 @@ fn guid_values(ids: &Map<String, Value>) -> Vec<String> {
         .collect()
 }
 
-fn project_item(record: &Value, rank: u32) -> Option<Value> {
+fn project_item(record: &Value, rank: u32) -> Option<AddonMediaListRecord> {
     let record = record.as_object()?;
     let kind = record.get("type")?.as_str()?;
     if !matches!(kind, "movie" | "show" | "season" | "episode") {
@@ -230,28 +260,28 @@ fn project_item(record: &Value, rank: u32) -> Option<Value> {
         _ if year.is_some() => format!("{title} ({})", year.unwrap_or_default()),
         _ => title.clone(),
     };
-    let mut item = Map::from_iter([
-        ("record_type".to_owned(), json!("item")),
-        (
-            "provider_id".to_owned(),
-            json!(format!("{kind}:{trakt_id}")),
-        ),
-        ("rank".to_owned(), json!(rank)),
-        ("display_title".to_owned(), json!(display_title)),
-        ("title".to_owned(), json!(title)),
-        ("kind".to_owned(), json!(kind)),
-        ("guids".to_owned(), json!(guid_values(ids))),
-    ]);
-    if let Some(value) = year {
-        item.insert("year".to_owned(), json!(value));
-    }
-    if let Some(value) = season {
-        item.insert("season".to_owned(), json!(value));
-    }
-    if let Some(value) = episode {
-        item.insert("episode".to_owned(), json!(value));
-    }
-    Some(Value::Object(item))
+    let wire_kind = match kind {
+        "movie" => AddonMediaListItemKind::Movie,
+        "show" => AddonMediaListItemKind::Show,
+        "season" => AddonMediaListItemKind::Season,
+        "episode" => AddonMediaListItemKind::Episode,
+        _ => return None,
+    };
+    Some(AddonMediaListRecord::Item {
+        provider_id: format!("{kind}:{trakt_id}"),
+        rank: i32::try_from(rank).ok()?,
+        display_title,
+        title,
+        year: year.and_then(|value| i32::try_from(value).ok()),
+        season: season.and_then(|value| i32::try_from(value).ok()),
+        episode: episode.and_then(|value| i32::try_from(value).ok()),
+        kind: wire_kind,
+        guids: guid_values(ids),
+        source_url: None,
+        availability: AddonMediaListItemAvailability::Available,
+        availability_reason: None,
+        content_kind: AddonMediaListContentKind::Auto,
+    })
 }
 
 fn list_operation(
@@ -269,7 +299,7 @@ fn list_operation(
     let metadata = api.get(&prefix)?.body;
     let metadata = metadata
         .as_object()
-        .ok_or_else(|| AddonError::unavailable("Trakt list metadata response is invalid"))?;
+        .ok_or_else(|| AddonError::rejected("Provider list metadata response is invalid"))?;
     let provider_id = metadata
         .get("ids")
         .and_then(Value::as_object)
@@ -278,11 +308,19 @@ fn list_operation(
         .unwrap_or_else(|| format!("{user}/{slug}"));
     emit(
         output,
-        &json!({
-            "record_type":"list", "provider_id":provider_id,
-            "name":metadata.get("name").and_then(Value::as_str).filter(|value| !value.is_empty()).unwrap_or(&slug),
-            "description":metadata.get("description").unwrap_or(&Value::Null)
-        }),
+        &AddonMediaListRecord::List {
+            provider_id,
+            name: metadata
+                .get("name")
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty())
+                .unwrap_or(&slug)
+                .to_owned(),
+            description: metadata
+                .get("description")
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned),
+        },
     )?;
     let mut rank = 0_u32;
     for page in 1..=MAX_PAGES {
@@ -292,7 +330,7 @@ fn list_operation(
         let records = response
             .body
             .as_array()
-            .ok_or_else(|| AddonError::unavailable("Trakt list-items response is invalid"))?;
+            .ok_or_else(|| AddonError::rejected("Provider list-items response is invalid"))?;
         for record in records {
             if let Some(item) = project_item(record, rank) {
                 emit(output, &item)?;
@@ -306,11 +344,19 @@ fn list_operation(
     Ok(())
 }
 
-fn check_result(configured: bool) -> Value {
+fn check_result(configured: bool) -> AddonCheckResult {
     if configured {
-        json!({"status":"ready","code":"ready","message":"Trakt Lists is ready."})
+        AddonCheckResult {
+            status: AddonCheckStatus::Ready,
+            code: "ready".to_owned(),
+            message: "Trakt Lists is ready.".to_owned(),
+        }
     } else {
-        json!({"status":"unavailable","code":"missing-client-id-reference","message":"Configure the client ID as a secret reference."})
+        AddonCheckResult {
+            status: AddonCheckStatus::Unavailable,
+            code: "missing-client-id-reference".to_owned(),
+            message: "Configure the client ID as a secret reference.".to_owned(),
+        }
     }
 }
 
@@ -326,14 +372,15 @@ fn run() -> Result<(), AddonError> {
         }
         "list" if secret.is_empty() => Err(AddonError::new(
             78,
-            "Trakt client ID reference is not configured",
+            "missing-secret",
+            "Required add-on secret reference is not configured",
         )),
         "list" => list_operation(
             &HttpTraktApi::new(secret)?,
             &env::var("ERSATZRS_MEDIA_LIST_URL").unwrap_or_default(),
             &mut output,
         ),
-        _ => Err(AddonError::usage("unsupported add-on operation")),
+        _ => Err(AddonError::failed("Unsupported add-on operation")),
     }
 }
 
@@ -350,6 +397,7 @@ fn main() -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
     use std::cell::RefCell;
     use std::collections::VecDeque;
 
@@ -398,17 +446,25 @@ mod tests {
 
     #[test]
     fn readiness_depends_only_on_the_secret_reference() {
-        assert_eq!(check_result(true)["status"], "ready");
-        assert_eq!(check_result(false)["code"], "missing-client-id-reference");
+        assert_eq!(check_result(true).status, AddonCheckStatus::Ready);
+        assert_eq!(check_result(false).code, "missing-client-id-reference");
+    }
+
+    #[test]
+    fn failures_render_as_structured_operation_diagnostics() {
+        let error = AddonError::new(78, "missing-secret", "Secret is unavailable");
+        let payload: Value = serde_json::from_str(&error.to_string()).unwrap();
+        assert_eq!(payload["code"], "missing-secret");
+        assert_eq!(payload["message"], "Secret is unavailable");
     }
 
     #[test]
     fn projects_guids_and_skips_unknown_kinds() {
         let item = project_item(&json!({"type":"movie","movie":{"title":"Movie","year":1999,"ids":{"trakt":10,"imdb":"tt1","tmdb":20,"tvdb":30}}}), 0).unwrap();
-        assert_eq!(
-            item["guids"],
-            json!(["imdb://tt1", "tmdb://20", "tvdb://30"])
-        );
+        let AddonMediaListRecord::Item { guids, .. } = item else {
+            panic!("expected item record");
+        };
+        assert_eq!(guids, ["imdb://tt1", "tmdb://20", "tvdb://30"]);
         assert_eq!(
             project_item(&json!({"type":"person","person":{"ids":{"trakt":1}}}), 0),
             None
@@ -433,6 +489,8 @@ mod tests {
         ]);
         let mut output = Vec::new();
         list_operation(&api, "https://trakt.tv/users/u/lists/l", &mut output).unwrap();
+        ersatzrs_addon_contract::conform_media_list_output(&output)
+            .expect("shared media-list contract");
         let rows = String::from_utf8(output)
             .unwrap()
             .lines()
@@ -440,6 +498,9 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(rows[0]["provider_id"], "42");
         assert_eq!(rows[1]["guids"], json!(["imdb://tt1"]));
+        assert!(rows[1].get("availability").is_none());
+        assert!(rows[1].get("content_kind").is_none());
+        assert!(rows[1].get("source_url").is_none());
         assert_eq!(rows[2]["rank"], 1);
         assert_eq!(api.paths.into_inner().len(), 3);
     }

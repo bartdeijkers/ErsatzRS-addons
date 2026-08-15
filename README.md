@@ -20,11 +20,13 @@ The two streaming add-ons send video straight to ErsatzRS for immediate
 playback; no permanent file is written.
 
 Package contracts are owned by the `ersatzrs-addon-contract` crate in the
-[ErsatzRS repository](https://github.com/bartdeijkers/ErsatzRS). Each package
-keeps its runtime self-contained below `addons/<id>/`. Python is used only by
-repository build and test tooling; it is not an add-on runtime dependency. The
-Trakt adapter is a native Rust executable, while Beeld & Geluid enumeration and
-playback remain implemented directly for POSIX and Windows.
+[ErsatzRS repository](https://github.com/bartdeijkers/ErsatzRS). Rust add-ons
+pin the full commit behind an immutable `addon-contract-v<version>` tag; the
+contract is not consumed from a package registry, moving branch, or local path.
+Each package keeps its runtime self-contained below `addons/<id>/`. Python is
+used only by repository build and test tooling; it is not an add-on runtime
+dependency. The Trakt adapter is a native Rust executable, while Beeld & Geluid
+enumeration and playback remain implemented directly for POSIX and Windows.
 
 ## Build the unsigned repository
 

@@ -7,7 +7,7 @@ if defined ERSATZRS_ADDON_SETTING_CURL_BIN set "CURL_BIN=%ERSATZRS_ADDON_SETTING
 if /i "%OPERATION%"=="check" goto :check
 if /i "%OPERATION%"=="list" goto :list
 if /i "%OPERATION%"=="play" goto :play
->&2 echo unsupported add-on operation
+call :fail operation-failed "Unsupported add-on operation." 64
 exit /b 64
 
 :check
@@ -29,23 +29,36 @@ exit /b 0
 if defined ERSATZRS_MEDIA_LIST_URL (
     set "BEELDENGELUID_OUTPUT=media-list"
     call "%~dp0libexec\beeldengeluid.bat" list "%ERSATZRS_MEDIA_LIST_URL%"
-    exit /b %ERRORLEVEL%
+    if errorlevel 1 goto :provider_failed
+    exit /b 0
 )
-if not defined ERSATZRS_REMOTE_STREAM_PLAYLIST_URL (
-    >&2 echo playlist URL is required
-    exit /b 64
-)
+if not defined ERSATZRS_REMOTE_STREAM_PLAYLIST_URL goto :missing_playlist_url
 call "%~dp0libexec\beeldengeluid.bat" list "%ERSATZRS_REMOTE_STREAM_PLAYLIST_URL%"
-exit /b %ERRORLEVEL%
+if errorlevel 1 goto :provider_failed
+exit /b 0
 
 :play
-if not defined ERSATZRS_REMOTE_STREAM_URL (
-    >&2 echo remote stream URL is required
-    exit /b 64
-)
+if not defined ERSATZRS_REMOTE_STREAM_URL goto :missing_stream_url
 if not defined ERSATZRS_REMOTE_STREAM_SEEK set "ERSATZRS_REMOTE_STREAM_SEEK=0"
 call "%~dp0libexec\beeldengeluid.bat" play "%ERSATZRS_REMOTE_STREAM_URL%" "%ERSATZRS_REMOTE_STREAM_SEEK%"
-exit /b %ERRORLEVEL%
+if errorlevel 1 goto :provider_failed
+exit /b 0
+
+:provider_failed
+call :fail provider-unreachable "The media provider request failed." 69
+exit /b 69
+
+:missing_playlist_url
+call :fail missing-setting "A playlist URL is required." 64
+exit /b 64
+
+:missing_stream_url
+call :fail missing-setting "A remote stream URL is required." 64
+exit /b 64
+
+:fail
+>&2 echo {"code":"%~1","message":"%~2"}
+exit /b %~3
 
 :require_program
 if "%~1"=="" exit /b 1

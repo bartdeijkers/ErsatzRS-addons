@@ -1,6 +1,6 @@
 # Beeld & Geluid add-on
 
-This add-on enumerates a Schatkamer series, public shared list, or saved-search
+This add-on enumerates a Schatkamer series, individual episode, public shared list, or saved-search
 link as NDJSON and streams individual episodes as MPEG-TS. Its Unix and Windows
 Remote Stream implementations perform the complete provider flow directly;
 they do not require Python, yt-dlp, browser cookies, or stored media URLs. The
@@ -36,8 +36,9 @@ create_playlist: true
 ```
 
 A public user-made list uses its shared `/lijst/<uuid>` URL. The generated
-playlist follows the user's order; duplicate programmes keep their first
-position, and programmes that Schatkamer marks unavailable are skipped:
+playlist follows the user's order across every result page; duplicate
+programmes keep their first position, and unavailable programmes retain their
+provider identity for diagnostics and local replacement:
 
 ```yaml
 name: Example shared list
@@ -56,7 +57,9 @@ browser session are rejected without replacing the last successful sync.
 
 The add-on list manager also accepts saved-search links such as
 `https://schatkamer.beeldengeluid.nl/zoeken?collectie=<name>`. It preserves the
-programme order returned by Schatkamer. The host-owned list synchronizer links
+search term, sorting, media type, date, broadcaster, collection, genre, person,
+and subject filters (including repeated and Unicode values), then follows all
+result pages in the programme order returned by Schatkamer. The host-owned list synchronizer links
 the records to the Remote Streams generated in that list's managed library.
 
 An individual episode definition uses the same identity:
@@ -67,6 +70,13 @@ addon: org.ersatzrs.addon.beeldengeluid
 is_live: false
 title: Episode title
 ```
+
+The same episode URL can be imported as an add-on list. Its optional chapter
+field accepts one `M:SS`, `MM:SS`, or `H:MM:SS` marker and title per line. The
+host validates the complete input atomically and retains the unbounded full
+episode alongside independently selectable fragments. Fragment playback uses
+whole-second `start` and optional `end` query parameters; the final `end` is
+omitted only when the provider does not expose a duration.
 
 Diagnostics go to stderr. Standard output is reserved for NDJSON during
 `list` and media bytes during `play`.

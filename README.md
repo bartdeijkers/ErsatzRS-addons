@@ -7,8 +7,8 @@ processes; packages are never loaded into the server process.
 
 The repository contains:
 
-- `org.ersatzrs.addon.beeldengeluid`: enumerates Schatkamer series, public
-  user-made lists, and saved searches, and streams their programmes. Its Remote
+- `org.ersatzrs.addon.beeldengeluid`: enumerates Schatkamer series, individual
+  episodes, public user-made lists, and saved searches, and streams their programmes. Its Remote
   Stream and media-list paths do not require Python or yt-dlp.
 - `org.ersatzrs.addon.yt-dlp`: streams a remote video through an
   operator-installed yt-dlp and the ErsatzRS-managed FFmpeg runtime.

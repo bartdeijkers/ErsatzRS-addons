@@ -24,14 +24,21 @@ class RepositoryTests(unittest.TestCase):
         list_page: str,
         media_list_contract: bool = False,
         episode_page: str | None = None,
+        list_page_2: str = "<html></html>",
+        series_page: str | None = None,
     ) -> subprocess.CompletedProcess[str]:
         addon = ROOT / "addons" / "org.ersatzrs.addon.beeldengeluid" / "addon.sh"
         with tempfile.TemporaryDirectory() as temporary:
             fixtures = pathlib.Path(temporary)
             (fixtures / "list.html").write_text(list_page, encoding="utf-8")
+            (fixtures / "list-2.html").write_text(list_page_2, encoding="utf-8")
             (fixtures / "series.html").write_text(
-                '<a href="/serie/20/fixture/aflevering/201"></a>'
-                '<a href="/serie/20/fixture/aflevering/203"></a>',
+                series_page
+                if series_page is not None
+                else (
+                    '<a href="/serie/20/fixture/aflevering/201"></a>'
+                    '<a href="/serie/20/fixture/aflevering/203"></a>'
+                ),
                 encoding="utf-8",
             )
             (fixtures / "empty.html").write_text("<html></html>", encoding="utf-8")
@@ -66,7 +73,9 @@ while [ "$#" -gt 0 ]; do
     shift
 done
 case "$url" in
-    */lijst/*) source_file=$FAKE_FIXTURES/list.html ;;
+    */lijst/*'pagina=1') source_file=$FAKE_FIXTURES/list.html ;;
+    */lijst/*'pagina=2') source_file=$FAKE_FIXTURES/list-2.html ;;
+    */lijst/*'pagina='*) source_file=$FAKE_FIXTURES/empty.html ;;
     *'pagina=1') source_file=$FAKE_FIXTURES/series.html ;;
     *'pagina='*) source_file=$FAKE_FIXTURES/empty.html ;;
     */aflevering/102) exit 22 ;;
@@ -242,10 +251,76 @@ cp "$source_file" "$output"
         self.assertEqual(rows[1]["availability"], "unavailable")
         self.assertEqual(rows[1]["availability_reason"], "not_playable")
         self.assertEqual(rows[1]["content_kind"], "auto")
-        self.assertEqual(
-            result.stderr,
+        self.assertIn(
             "beeldengeluid.sh: retained 1 unavailable Schatkamer shared-list item(s)\n",
+            result.stderr,
         )
+
+    @unittest.skipUnless(pathlib.Path("/bin/sh").exists(), "POSIX shell required")
+    def test_posix_beeldengeluid_paginates_and_deduplicates_shared_lists(self) -> None:
+        first_page = (
+            r'<script>\"description\":\"Gedeelde lijst\",'
+            r'\"url\":\"https://schatkamer.beeldengeluid.nl/serie/10/first/aflevering/101\",\"isPlayable\":true,'
+            r'\"url\":\"https://schatkamer.beeldengeluid.nl/serie/10/second/aflevering/103\",\"isPlayable\":true</script>'
+        )
+        second_page = (
+            r'<script>\"description\":\"Gedeelde lijst\",'
+            r'\"url\":\"https://schatkamer.beeldengeluid.nl/serie/10/second/aflevering/103\",\"isPlayable\":true,'
+            r'\"url\":\"https://schatkamer.beeldengeluid.nl/serie/10/third/aflevering/104\",\"isPlayable\":true</script>'
+        )
+        result = self.run_posix_beeldengeluid_list(
+            "https://schatkamer.beeldengeluid.nl/lijst/14df8d33-ce8a-4680-a83b-0cc2a9c58bcd",
+            first_page,
+            list_page_2=second_page,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        rows = [json.loads(line) for line in result.stdout.splitlines()]
+        self.assertEqual([row["id"] for row in rows], ["101", "103", "104"])
+
+    @unittest.skipUnless(pathlib.Path("/bin/sh").exists(), "POSIX shell required")
+    def test_posix_beeldengeluid_imports_series_introduction_and_images(self) -> None:
+        series_page = (
+            '<script type="application/ld+json">'
+            '{"@context":"https://schema.org","@type":"CreativeWorkSeries",'
+            '"name":"Fixture Programme","description":"Full editorial introduction",'
+            '"image":"https://schatkamer.beeldengeluid.nl/assets/programme.jpg"}'
+            '</script><a href="/serie/20/fixture/aflevering/201"></a>'
+        )
+        episode_page = (
+            '<h1>Fixture Programme</h1><h3>First Episode</h3>'
+            '<script>{"image":"https://schatkamer.beeldengeluid.nl/assets/episode.jpg"};'
+            r'\"description\":\"Fixture plot\",\"disclaimer\":null,'
+            r'\"durationNumber\":120</script>'
+        )
+        result = self.run_posix_beeldengeluid_list(
+            "https://schatkamer.beeldengeluid.nl/serie/20/fixture",
+            "",
+            media_list_contract=True,
+            episode_page=episode_page,
+            series_page=series_page,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        rows = [json.loads(line) for line in result.stdout.splitlines()]
+        self.assertEqual(rows[0]["name"], "Fixture Programme")
+        self.assertEqual(rows[0]["description"], "Full editorial introduction")
+        self.assertEqual(rows[1]["duration_seconds"], 120)
+        self.assertEqual(
+            rows[1]["additional_image_urls"],
+            ["https://schatkamer.beeldengeluid.nl/assets/episode.jpg"],
+        )
+
+    @unittest.skipUnless(pathlib.Path("/bin/sh").exists(), "POSIX shell required")
+    def test_posix_beeldengeluid_accepts_one_episode_as_a_list(self) -> None:
+        result = self.run_posix_beeldengeluid_list(
+            "https://schatkamer.beeldengeluid.nl/serie/20/fixture/aflevering/201",
+            "",
+            media_list_contract=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        rows = [json.loads(line) for line in result.stdout.splitlines()]
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[1]["provider_id"], "episode:201")
+        self.assertNotIn("start=", rows[1]["source_url"])
 
     @unittest.skipUnless(pathlib.Path("/bin/sh").exists(), "POSIX shell required")
     def test_posix_beeldengeluid_classifies_provider_metadata(self) -> None:

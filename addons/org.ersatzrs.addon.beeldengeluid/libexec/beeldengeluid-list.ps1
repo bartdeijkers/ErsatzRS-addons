@@ -29,20 +29,21 @@ function JsonArrayValues([string]$html, [string]$start, [string]$end) {
 }
 
 function Invoke-CurlToFile([string]$url, [string]$output, [string]$failure) {
-    & $env:CURL_BIN --fail --silent --show-error --location --output $output $url
+    & $env:CURL_BIN --fail --silent --show-error --location --max-redirs 5 --proto '=https' --proto-redir '=https' --retry 2 --connect-timeout 10 --max-time 45 --output $output $url
     if ($LASTEXITCODE -ne 0) { throw $failure }
 }
 
 try {
     $uri = [Uri]$env:PLAYLIST_URL
-    $isSeries = $uri.AbsolutePath -match '^/serie/\d+/[^/]+/?$'
+    $isSeries = $uri.AbsolutePath -match '^/(serie|programma)/\d+/[^/]+/?$'
+    $isVideo = $uri.AbsolutePath -match '^/serie/\d+/[^/]+/aflevering/\d+/?$'
     $isSharedList = $uri.AbsolutePath -match
         '^/lijst/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/?$'
-    $isSearch = $uri.AbsolutePath -eq '/zoeken' -and $uri.Query.Length -gt 1
+    $isSearch = $uri.AbsolutePath -eq '/zoeken' -or $uri.AbsolutePath.StartsWith('/zoeken/')
     if (
         $uri.Scheme -notin @('http', 'https') -or
         $uri.Host -ne 'schatkamer.beeldengeluid.nl' -or
-        (-not $isSeries -and -not $isSharedList -and -not $isSearch)
+        (-not $isSeries -and -not $isVideo -and -not $isSharedList -and -not $isSearch)
     ) {
         throw 'unsupported playlist URL'
     }
@@ -51,6 +52,8 @@ try {
     $mediaListMode = $env:BEELDENGELUID_OUTPUT -eq 'media-list'
     $mediaListRows = [Collections.Generic.List[string]]::new()
     $sharedListName = ''
+    $listDescription = 'Programmes selected by the supplied Schatkamer link.'
+    $listImage = $null
     $work = Join-Path $env:TEMP ('ersatzrs-beeldengeluid-list-' + [Guid]::NewGuid().ToString('N'))
     [IO.Directory]::CreateDirectory($work) | Out-Null
     try {
@@ -60,8 +63,11 @@ try {
         $paths = [Collections.Generic.List[string]]::new()
         $availabilityByPath = @{}
 
-        if ($isSeries -or $isSearch) {
-            for ($page = 1; $page -le 100; $page++) {
+        if ($isVideo) {
+            $paths.Add($uri.AbsolutePath.TrimEnd('/'))
+            $availabilityByPath[$uri.AbsolutePath.TrimEnd('/')] = 'available'
+        } elseif ($isSeries -or $isSearch) {
+            for ($page = 1; ; $page++) {
                 $pageUrl = if ($isSearch) {
                     $uri.GetLeftPart([UriPartial]::Path) + $uri.Query + '&pagina=' + $page
                 } else {
@@ -69,6 +75,21 @@ try {
                 }
                 Invoke-CurlToFile $pageUrl $pageFile 'programme-list page request failed'
                 $html = [IO.File]::ReadAllText($pageFile)
+                if ($page -eq 1 -and $isSeries) {
+                    foreach ($script in [regex]::Matches(
+                        $html,
+                        '<script[^>]+type=\x22application/ld[+]json\x22[^>]*>(.*?)</script>',
+                        'Singleline'
+                    )) {
+                        try { $metadata = $script.Groups[1].Value | ConvertFrom-Json } catch { continue }
+                        if ($metadata.'@type' -eq 'CreativeWorkSeries') {
+                            if ($metadata.name) { $sharedListName = [string]$metadata.name }
+                            if ($metadata.description) { $listDescription = [string]$metadata.description }
+                            if ($metadata.image) { $listImage = [string]$metadata.image }
+                            break
+                        }
+                    }
+                }
                 $added = 0
                 foreach ($match in [regex]::Matches(
                     $html,
@@ -81,45 +102,51 @@ try {
                         $added++
                     }
                 }
+                [Console]::Error.WriteLine(
+                    'beeldengeluid.bat: result page {0} yielded {1} new episode(s)' -f $page, $added
+                )
                 if ($added -eq 0) { break }
             }
         } else {
-            Invoke-CurlToFile $base $pageFile 'shared-list page request failed'
-            $html = [IO.File]::ReadAllText($pageFile)
-            if (-not [regex]::IsMatch(
-                $html,
-                '\\\x22description\\\x22:\\\x22Gedeelde lijst\\\x22'
-            )) {
-                throw 'shared list is unavailable or private'
-            }
-            # The page header carries the name the owner gave the list, next to
-            # the marker validated above.
-            $nameMatch = [regex]::Match(
-                $html,
-                '\\\x22title\\\x22:\\\x22(.*?)\\\x22,\\\x22description\\\x22:\\\x22Gedeelde lijst\\\x22'
-            )
-            if ($nameMatch.Success) {
-                $sharedListName = $nameMatch.Groups[1].Value.
-                    Replace('\u0026', '&').
-                    Replace('\u003c', '<').
-                    Replace('\u003e', '>').
-                    Replace('\u0027', "'").
-                    Replace('\/', '/')
-            }
             $skipped = 0
             $pattern = '\\\x22url\\\x22:\\\x22' +
                 '(https://schatkamer[.]beeldengeluid[.]nl/serie/\d+/[^\\\x22/]+/aflevering/\d+)' +
                 '\\\x22.*?\\\x22isPlayable\\\x22:(true|false)'
-            foreach ($match in [regex]::Matches($html, $pattern, 'Singleline')) {
-                $path = ([Uri]$match.Groups[1].Value).AbsolutePath
-                if (-not $seen.Add($path)) { continue }
-                $paths.Add($path)
-                if ($match.Groups[2].Value -eq 'true') {
-                    $availabilityByPath[$path] = 'available'
-                } else {
-                    $availabilityByPath[$path] = 'unavailable'
-                    $skipped++
+            for ($page = 1; ; $page++) {
+                Invoke-CurlToFile ($base + '?pagina=' + $page) $pageFile 'shared-list page request failed'
+                $html = [IO.File]::ReadAllText($pageFile)
+                if ($page -eq 1) {
+                    if (-not [regex]::IsMatch(
+                        $html,
+                        '\\\x22description\\\x22:\\\x22Gedeelde lijst\\\x22'
+                    )) { throw 'shared list is unavailable or private' }
+                    $nameMatch = [regex]::Match(
+                        $html,
+                        '\\\x22title\\\x22:\\\x22(.*?)\\\x22,\\\x22description\\\x22:\\\x22Gedeelde lijst\\\x22'
+                    )
+                    if ($nameMatch.Success) {
+                        $sharedListName = $nameMatch.Groups[1].Value.
+                            Replace('\u0026', '&').Replace('\u003c', '<').
+                            Replace('\u003e', '>').Replace('\u0027', "'").Replace('\/', '/')
+                    }
                 }
+                $added = 0
+                foreach ($match in [regex]::Matches($html, $pattern, 'Singleline')) {
+                    $path = ([Uri]$match.Groups[1].Value).AbsolutePath
+                    if (-not $seen.Add($path)) { continue }
+                    $paths.Add($path)
+                    $added++
+                    if ($match.Groups[2].Value -eq 'true') {
+                        $availabilityByPath[$path] = 'available'
+                    } else {
+                        $availabilityByPath[$path] = 'unavailable'
+                        $skipped++
+                    }
+                }
+                [Console]::Error.WriteLine(
+                    'beeldengeluid.bat: shared-list page {0} yielded {1} new item(s)' -f $page, $added
+                )
+                if ($added -eq 0) { break }
             }
             if ($skipped -gt 0) {
                 [Console]::Error.WriteLine(
@@ -139,7 +166,7 @@ try {
                 record_type = 'list'
                 provider_id = $uri.AbsolutePath.Trim('/') + $uri.Query
                 name = $listName
-                description = 'Programmes selected by the supplied Schatkamer link.'
+                description = $listDescription
             }
             $mediaListRows.Add(($listRecord | ConvertTo-Json -Compress))
         }
@@ -205,6 +232,11 @@ try {
             if ($series) { $title = $series + ' - ' + $title }
 
             $duration = [regex]::Match($programHtml, '\\\x22durationNumber\\\x22:(\d+)')
+            $imageMatch = [regex]::Match(
+                $html.Replace('\"', '"'),
+                '"image":"(https://schatkamer[.]beeldengeluid[.]nl/[^"]+)"'
+            )
+            $episodeImage = if ($imageMatch.Success) { $imageMatch.Groups[1].Value } else { $listImage }
             $publishedMatches = [regex]::Matches(
                 $programHtml,
                 '\\\x22publishedAtISO\\\x22:\\\x22([^\\\x22]+)'
@@ -264,6 +296,10 @@ try {
             if ($availability -eq 'unavailable') { $row.availability_reason = 'not_playable' }
             if ($series) { $row.show_title = $series }
             if ($duration.Success) { $row.duration_seconds = [int64]$duration.Groups[1].Value }
+            if ($episodeImage) {
+                $row.thumbnail_url = $episodeImage
+                $row.additional_image_urls = @($episodeImage)
+            }
             if ($plot) { $row.plot = $plot }
             if ($published) {
                 $row.release_date = $published
@@ -314,6 +350,8 @@ try {
                 }
                 if ($availability -eq 'unavailable') { $item.availability_reason = 'not_playable' }
                 if ($published) { $item.year = [int]$published.Substring(0, 4) }
+                if ($duration.Success) { $item.duration_seconds = [int64]$duration.Groups[1].Value }
+                if ($episodeImage) { $item.additional_image_urls = @($episodeImage) }
                 $mediaListRows.Add(($item | ConvertTo-Json -Depth 2 -Compress))
                 $rank++
             } else {
@@ -331,6 +369,8 @@ try {
         }
     }
 } catch {
-    [Console]::Error.WriteLine('beeldengeluid.bat: playlist enumeration failed')
+    [Console]::Error.WriteLine(
+        'beeldengeluid.bat: playlist enumeration failed: ' + $_.Exception.Message
+    )
     exit 1
 }

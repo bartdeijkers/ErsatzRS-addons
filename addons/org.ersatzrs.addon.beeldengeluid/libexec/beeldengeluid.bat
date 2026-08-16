@@ -60,6 +60,8 @@ if errorlevel 1 (
     >&2 echo beeldengeluid.bat: the seek timestamp is invalid
     exit /b 64
 )
+for /f "usebackq tokens=1,* delims==" %%A in (`powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%~dp0beeldengeluid-fragment.ps1"`) do set "%%A=%%B"
+if errorlevel 1 exit /b 64
 
 set "WORK_ID=%RANDOM%-%RANDOM%"
 set "PAYLOAD_FILE=%TEMP%\ersatzrs-beeldengeluid-%WORK_ID%-payload.json"
@@ -70,7 +72,7 @@ set "CHUNK_FILE=%TEMP%\ersatzrs-beeldengeluid-%WORK_ID%-chunk.js"
 set "RSC_FILE=%TEMP%\ersatzrs-beeldengeluid-%WORK_ID%-response.rsc"
 set "STREAMS_FILE=%TEMP%\ersatzrs-beeldengeluid-%WORK_ID%-streams.txt"
 
-"%CURL_BIN%" --fail --silent --show-error --location --cookie-jar "%COOKIE_FILE%" --output "%PAGE_FILE%" "%EPISODE_URL%"
+"%CURL_BIN%" --fail --silent --show-error --location --max-redirs 5 --proto "=https" --proto-redir "=https" --retry 2 --connect-timeout 10 --max-time 45 --cookie-jar "%COOKIE_FILE%" --output "%PAGE_FILE%" "%EPISODE_PAGE_URL%"
 if errorlevel 1 (
     >&2 echo beeldengeluid.bat: the Schatkamer episode page request failed
     goto :failed
@@ -129,7 +131,7 @@ if errorlevel 1 (
     --header "Accept: text/x-component" ^
     --data-binary "@%PAYLOAD_FILE%" ^
     --output "%RSC_FILE%" ^
-    "%EPISODE_URL%"
+    "%EPISODE_PAGE_URL%"
 if errorlevel 1 (
     >&2 echo beeldengeluid.bat: the Schatkamer stream request failed
     goto :failed
@@ -172,7 +174,11 @@ if errorlevel 1 (
 set "STREAM_COUNT=0"
 for /f "usebackq tokens=1,* delims=	" %%A in ("%STREAMS_FILE%") do (
     set /a STREAM_COUNT+=1 >nul
-    "%FFMPEG_BIN%" -nostdin -hide_banner -loglevel error -ss "%SEEK_POSITION%" -headers "Cookie: %%B" -i "%%A" -map 0:v:0? -map 0:a:0? -c copy -f mpegts pipe:1
+    if defined FRAGMENT_DURATION (
+        "%FFMPEG_BIN%" -nostdin -hide_banner -loglevel error -ss "%SEEK_POSITION%" -headers "Cookie: %%B" -i "%%A" -t "%FRAGMENT_DURATION%" -map 0:v:0? -map 0:a:0? -c copy -f mpegts pipe:1
+    ) else (
+        "%FFMPEG_BIN%" -nostdin -hide_banner -loglevel error -ss "%SEEK_POSITION%" -headers "Cookie: %%B" -i "%%A" -map 0:v:0? -map 0:a:0? -c copy -f mpegts pipe:1
+    )
     if errorlevel 1 goto :ffmpeg_failed
 )
 

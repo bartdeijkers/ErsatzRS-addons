@@ -81,6 +81,34 @@ json_scalar_value() {
         | html_decode
 }
 
+json_ld_series_value() {
+    field=$1
+    file=$2
+    awk -v field="$field" '
+        {
+            type_at = index($0, "\"@type\":\"CreativeWorkSeries\"")
+            if (!type_at) next
+            rest = substr($0, type_at)
+            marker = "\"" field "\":\""
+            value_at = index(rest, marker)
+            if (!value_at) next
+            value = substr(rest, value_at + length(marker))
+            result = ""
+            escaped = 0
+            for (i = 1; i <= length(value); i++) {
+                character = substr(value, i, 1)
+                if (escaped) {
+                    if (character == "n" || character == "r" || character == "t") result = result " "
+                    else result = result character
+                    escaped = 0
+                } else if (character == "\\") escaped = 1
+                else if (character == "\"") { print result; exit }
+                else result = result character
+            }
+        }
+    ' "$file" | html_decode
+}
+
 write_json_array() {
     field=$1
     file=$2
@@ -99,11 +127,14 @@ write_json_array() {
 discover_series_paths() {
     series_base=$1
     page_number=1
-    while [ "$page_number" -le 100 ]; do
+    while :; do
         page_url="$series_base?pagina=$page_number"
-        "$curl_bin" --fail --silent --show-error --location \
+        "$curl_bin" --fail --silent --show-error --location --max-redirs 5 --proto '=https' --proto-redir '=https' --retry 2 --connect-timeout 10 --max-time 45 \
             --output "$list_work_dir/page.html" "$page_url" \
             || fail "the Schatkamer series page request failed"
+        if [ "$page_number" -eq 1 ]; then
+            sed '' "$list_work_dir/page.html" >"$list_work_dir/source-page.html"
+        fi
         grep -o 'href="/serie/[0-9][0-9]*/[^"/]*/aflevering/[0-9][0-9]*"' \
             "$list_work_dir/page.html" \
             | sed -e 's/^href="//' -e 's/"$//' \
@@ -115,6 +146,9 @@ discover_series_paths() {
                 printf '%s\n' "$episode_path" >>"$list_work_dir/new-links.txt"
             fi
         done <"$list_work_dir/page-links.txt"
+        page_new_count=$(awk 'END { print NR + 0 }' "$list_work_dir/new-links.txt")
+        printf 'beeldengeluid.sh: series page %s yielded %s new episode(s)\n' \
+            "$page_number" "$page_new_count" >&2
         [ -s "$list_work_dir/new-links.txt" ] || break
         page_number=$((page_number + 1))
     done
@@ -125,12 +159,12 @@ discover_series_paths() {
 discover_search_paths() {
     search_url=$1
     page_number=1
-    while [ "$page_number" -le 100 ]; do
+    while :; do
         case "$search_url" in
             *\?*) page_url="$search_url&pagina=$page_number" ;;
             *) page_url="$search_url?pagina=$page_number" ;;
         esac
-        "$curl_bin" --fail --silent --show-error --location \
+        "$curl_bin" --fail --silent --show-error --location --max-redirs 5 --proto '=https' --proto-redir '=https' --retry 2 --connect-timeout 10 --max-time 45 \
             --output "$list_work_dir/page.html" "$page_url" \
             || fail "the Schatkamer search page request failed"
         grep -o 'href="/serie/[0-9][0-9]*/[^"/]*/aflevering/[0-9][0-9]*"' \
@@ -144,6 +178,9 @@ discover_search_paths() {
                 printf '%s\n' "$episode_path" >>"$list_work_dir/new-links.txt"
             fi
         done <"$list_work_dir/page-links.txt"
+        page_new_count=$(awk 'END { print NR + 0 }' "$list_work_dir/new-links.txt")
+        printf 'beeldengeluid.sh: search page %s yielded %s new result(s)\n' \
+            "$page_number" "$page_new_count" >&2
         [ -s "$list_work_dir/new-links.txt" ] || break
         page_number=$((page_number + 1))
     done
@@ -153,65 +190,73 @@ discover_search_paths() {
 
 discover_shared_list_paths() {
     shared_list_url=$1
-    "$curl_bin" --fail --silent --show-error --location \
-        --output "$list_work_dir/page.html" "$shared_list_url" \
-        || fail "the Schatkamer shared-list page request failed"
-    sed 's/\\"/"/g' "$list_work_dir/page.html" \
-        >"$list_work_dir/normalized-list.html"
-    grep -Fq '"description":"Gedeelde lijst"' \
-        "$list_work_dir/normalized-list.html" \
-        || fail "the Schatkamer shared list is unavailable or private"
-
-    # The page header carries the name the owner gave the list, next to the
-    # marker validated above. Callers fall back to the generic name when a
-    # page omits it.
-    shared_list_name=$(grep -o '"title":"[^"]*","description":"Gedeelde lijst"' \
-        "$list_work_dir/normalized-list.html" \
-        | sed -n '1{s/^"title":"//;s/","description":"Gedeelde lijst"$//;p;}' \
-        | sed -e 's/\\u0026/\&/g' -e 's/\\u003c/</g' -e 's/\\u003e/>/g' \
-            -e "s/\\\\u0027/'/g" -e 's|\\/|/|g')
-
-    awk '
-        BEGIN {
-            marker = "\"url\":\"https://schatkamer.beeldengeluid.nl/serie/"
-            playable_marker = "\"isPlayable\":"
-        }
-        {
-            rest = $0
-            while ((start = index(rest, marker)) > 0) {
-                candidate = substr(rest, start + length(marker))
-                finish = index(candidate, "\"")
-                if (finish == 0) break
-                suffix = substr(candidate, 1, finish - 1)
-                after_url = substr(candidate, finish + 1)
-                playable_at = index(after_url, playable_marker)
-                next_url = index(after_url, marker)
-                if (playable_at > 0 && (next_url == 0 || playable_at < next_url)) {
-                    state = substr(after_url, playable_at + length(playable_marker), 5)
-                    if (state ~ /^true/) print "playable|/serie/" suffix
-                    else if (state ~ /^false/) print "unavailable|/serie/" suffix
-                }
-                rest = after_url
-            }
-        }
-    ' "$list_work_dir/normalized-list.html" >"$list_work_dir/list-entries.txt"
-
+    : >"$list_work_dir/list-entries.txt"
     unavailable_count=0
-    while IFS='|' read -r state episode_path; do
-        [ -n "$episode_path" ] || continue
-        if ! printf '%s\n' "$episode_path" \
-            | LC_ALL=C grep -Eq '^/serie/[0-9]+/[^/]+/aflevering/[0-9]+$'; then
-            continue
+    page_number=1
+    while :; do
+        page_url="$shared_list_url?pagina=$page_number"
+        "$curl_bin" --fail --silent --show-error --location --max-redirs 5 --proto '=https' --proto-redir '=https' --retry 2 --connect-timeout 10 --max-time 45 \
+            --output "$list_work_dir/page.html" "$page_url" \
+            || fail "the Schatkamer shared-list page request failed"
+        sed 's/\\"/"/g' "$list_work_dir/page.html" \
+            >"$list_work_dir/normalized-list.html"
+        if [ "$page_number" -eq 1 ]; then
+            grep -Fq '"description":"Gedeelde lijst"' \
+                "$list_work_dir/normalized-list.html" \
+                || fail "the Schatkamer shared list is unavailable or private"
+            shared_list_name=$(grep -o '"title":"[^"]*","description":"Gedeelde lijst"' \
+                "$list_work_dir/normalized-list.html" \
+                | sed -n '1{s/^"title":"//;s/","description":"Gedeelde lijst"$//;p;}' \
+                | sed -e 's/\\u0026/\&/g' -e 's/\\u003c/</g' -e 's/\\u003e/>/g' \
+                    -e "s/\\\\u0027/'/g" -e 's|\\/|/|g')
         fi
-        if grep -Fqx "$episode_path" "$list_work_dir/seen-all.txt"; then
-            continue
-        fi
-        printf '%s\n' "$episode_path" >>"$list_work_dir/seen-all.txt"
-        printf '%s\n' "$episode_path" >>"$list_work_dir/seen.txt"
-        if [ "$state" != playable ]; then
-            unavailable_count=$((unavailable_count + 1))
-        fi
-    done <"$list_work_dir/list-entries.txt"
+        awk '
+            BEGIN {
+                marker = "\"url\":\"https://schatkamer.beeldengeluid.nl/serie/"
+                playable_marker = "\"isPlayable\":"
+            }
+            {
+                rest = $0
+                while ((start = index(rest, marker)) > 0) {
+                    candidate = substr(rest, start + length(marker))
+                    finish = index(candidate, "\"")
+                    if (finish == 0) break
+                    suffix = substr(candidate, 1, finish - 1)
+                    after_url = substr(candidate, finish + 1)
+                    playable_at = index(after_url, playable_marker)
+                    next_url = index(after_url, marker)
+                    if (playable_at > 0 && (next_url == 0 || playable_at < next_url)) {
+                        state = substr(after_url, playable_at + length(playable_marker), 5)
+                        if (state ~ /^true/) print "playable|/serie/" suffix
+                        else if (state ~ /^false/) print "unavailable|/serie/" suffix
+                    }
+                    rest = after_url
+                }
+            }
+        ' "$list_work_dir/normalized-list.html" >"$list_work_dir/page-entries.txt"
+        page_new=0
+        while IFS='|' read -r state episode_path; do
+            [ -n "$episode_path" ] || continue
+            if ! printf '%s\n' "$episode_path" \
+                | LC_ALL=C grep -Eq '^/serie/[0-9]+/[^/]+/aflevering/[0-9]+$'; then
+                continue
+            fi
+            if grep -Fqx "$episode_path" "$list_work_dir/seen-all.txt"; then
+                continue
+            fi
+            printf '%s\n' "$episode_path" >>"$list_work_dir/seen-all.txt"
+            printf '%s\n' "$episode_path" >>"$list_work_dir/seen.txt"
+            printf '%s|%s\n' "$state" "$episode_path" >>"$list_work_dir/list-entries.txt"
+            page_new=$((page_new + 1))
+            if [ "$state" != playable ]; then
+                unavailable_count=$((unavailable_count + 1))
+            fi
+        done <"$list_work_dir/page-entries.txt"
+        printf 'beeldengeluid.sh: shared-list page %s yielded %s new item(s)\n' \
+            "$page_number" "$page_new" >&2
+        [ "$page_new" -gt 0 ] || break
+        page_number=$((page_number + 1))
+    done
 
     [ -s "$list_work_dir/seen.txt" ] \
         || fail "the Schatkamer shared list did not contain episodes"
@@ -229,16 +274,26 @@ list_playlist() {
         remote-stream | media-list) ;;
         *) fail "unsupported list output contract" 64 ;;
     esac
+    source_kind=${ERSATZRS_MEDIA_LIST_SOURCE_KIND:-}
     case "$playlist_url" in
-        https://schatkamer.beeldengeluid.nl/zoeken\?* | \
+        https://schatkamer.beeldengeluid.nl/zoeken | \
+            https://schatkamer.beeldengeluid.nl/zoeken/* | \
+            https://schatkamer.beeldengeluid.nl/zoeken\?* | \
+            http://schatkamer.beeldengeluid.nl/zoeken | \
+            http://schatkamer.beeldengeluid.nl/zoeken/* | \
             http://schatkamer.beeldengeluid.nl/zoeken\?*)
             source_kind=search
             ;;
         https://schatkamer.beeldengeluid.nl/serie/*/* | \
-            http://schatkamer.beeldengeluid.nl/serie/*/*)
+            http://schatkamer.beeldengeluid.nl/serie/*/* | \
+            https://schatkamer.beeldengeluid.nl/programma/*/* | \
+            http://schatkamer.beeldengeluid.nl/programma/*/*)
             playlist_url=${playlist_url%%\?*}
             playlist_url=${playlist_url%/}
-            source_kind=series
+            case "$playlist_url" in
+                */aflevering/*) source_kind=video ;;
+                *) source_kind=series ;;
+            esac
             ;;
         https://schatkamer.beeldengeluid.nl/lijst/* | \
             http://schatkamer.beeldengeluid.nl/lijst/*)
@@ -255,10 +310,6 @@ list_playlist() {
             fail "unsupported Schatkamer playlist URL" 64
             ;;
     esac
-    case "$playlist_url" in
-        */aflevering/*) fail "list requires a Schatkamer series URL" 64 ;;
-    esac
-
     curl_bin=${CURL_BIN:-curl}
     find_program "$curl_bin" "curl"
     find_program grep "grep"
@@ -276,8 +327,17 @@ list_playlist() {
     : >"$list_work_dir/seen.txt"
     : >"$list_work_dir/seen-all.txt"
     shared_list_name=
-    if [ "$source_kind" = series ]; then
+    list_description='Programmes selected by the supplied Schatkamer link.'
+    list_image=
+    if [ "$source_kind" = video ]; then
+        episode_path=${playlist_url#*://schatkamer.beeldengeluid.nl}
+        printf '%s\n' "$episode_path" >"$list_work_dir/seen.txt"
+    elif [ "$source_kind" = series ]; then
         discover_series_paths "$playlist_url"
+        shared_list_name=$(json_ld_series_value name "$list_work_dir/source-page.html")
+        series_description=$(json_ld_series_value description "$list_work_dir/source-page.html")
+        list_image=$(json_ld_series_value image "$list_work_dir/source-page.html")
+        [ -z "$series_description" ] || list_description=$series_description
     elif [ "$source_kind" = search ]; then
         discover_search_paths "$playlist_url"
     else
@@ -289,8 +349,9 @@ list_playlist() {
         provider_id=$(printf '%s' "$provider_id" | json_escape)
         list_name=${shared_list_name:-Beeld & Geluid Schatkamer}
         list_name=$(printf '%s' "$list_name" | json_escape)
+        list_description_json=$(printf '%s' "$list_description" | json_escape)
         printf '%s\n' \
-            "{\"record_type\":\"list\",\"provider_id\":\"$provider_id\",\"name\":\"$list_name\",\"description\":\"Programmes selected by the supplied Schatkamer link.\"}" \
+            "{\"record_type\":\"list\",\"provider_id\":\"$provider_id\",\"name\":\"$list_name\",\"description\":\"$list_description_json\"}" \
             >"$list_work_dir/media-list.ndjson"
     fi
     while IFS= read -r episode_path; do
@@ -303,7 +364,7 @@ list_playlist() {
             availability=unavailable
             availability_reason=not_playable
         fi
-        if ! "$curl_bin" --fail --silent --show-error --location \
+        if ! "$curl_bin" --fail --silent --show-error --location --max-redirs 5 --proto '=https' --proto-redir '=https' --retry 2 --connect-timeout 10 --max-time 45 \
             --output "$list_work_dir/episode.html" "$episode_url"; then
             if [ "$availability" != unavailable ]; then
                 fail "a Schatkamer episode metadata request failed"
@@ -335,6 +396,10 @@ list_playlist() {
             title=$episode_title
         fi
         title=$(printf '%s' "$title" | html_decode | json_escape)
+        episode_image=$(sed 's/\\"/"/g' "$list_work_dir/episode.html" \
+            | grep -o '"image":"https://schatkamer.beeldengeluid.nl/[^"]*"' \
+            | sed -n '1{s/^"image":"//;s/"$//;p;}')
+        [ -n "$episode_image" ] || episode_image=$list_image
         plot=$(json_scalar_value description disclaimer \
             "$list_work_dir/episode.html" | json_escape)
         duration_seconds=$(grep -o '\\"durationNumber\\":[0-9][0-9]*' \
@@ -421,6 +486,11 @@ list_playlist() {
                 || printf ',"availability_reason":"%s"' "$availability_reason" >>"$list_work_dir/media-list.ndjson"
             [ -z "$year" ] \
                 || printf ',"year":%s' "$year" >>"$list_work_dir/media-list.ndjson"
+            [ -z "$duration_seconds" ] \
+                || printf ',"duration_seconds":%s' "$duration_seconds" >>"$list_work_dir/media-list.ndjson"
+            [ -z "$episode_image" ] \
+                || printf ',"additional_image_urls":["%s"]' \
+                    "$(printf '%s' "$episode_image" | json_escape)" >>"$list_work_dir/media-list.ndjson"
             printf '}\n' >>"$list_work_dir/media-list.ndjson"
             rank=$((rank + 1))
             continue
@@ -434,6 +504,10 @@ list_playlist() {
         [ -z "$duration_seconds" ] \
             || printf ',"duration_seconds":%s' "$duration_seconds"
         [ -z "$plot" ] || printf ',"plot":"%s"' "$plot"
+        [ -z "$episode_image" ] \
+            || printf ',"thumbnail_url":"%s","additional_image_urls":["%s"]' \
+                "$(printf '%s' "$episode_image" | json_escape)" \
+                "$(printf '%s' "$episode_image" | json_escape)"
         [ -z "$year" ] || printf ',"year":%s' "$year"
         [ -z "$release_date" ] || printf ',"release_date":"%s"' "$release_date"
         [ -z "$content_rating" ] \
@@ -538,6 +612,28 @@ esac
 
 url_without_query=${episode_url%%\?*}
 url_without_query=${url_without_query%%\#*}
+fragment_duration=
+case "$episode_url" in
+    *\?*)
+        fragment_query=${episode_url#*\?}
+        fragment_query=${fragment_query%%\#*}
+        fragment_start=$(query_value "$fragment_query" start || true)
+        fragment_end=$(query_value "$fragment_query" end || true)
+        if [ -n "$fragment_start" ]; then
+            case "$fragment_start" in *[!0-9]*) fail "fragment start must be whole seconds" 64 ;; esac
+            if [ "$seek_position" = 0 ]; then
+                seek_position=$fragment_start
+            fi
+        fi
+        if [ -n "$fragment_end" ]; then
+            case "$fragment_end" in *[!0-9]*) fail "fragment end must be whole seconds" 64 ;; esac
+            [ -n "$fragment_start" ] || fail "fragment end requires fragment start" 64
+            [ "$fragment_end" -gt "$fragment_start" ] \
+                || fail "fragment end must be after fragment start" 64
+            fragment_duration=$((fragment_end - fragment_start))
+        fi
+        ;;
+esac
 video_id=${url_without_query##*/}
 case "$video_id" in
     '' | *[!0-9]*)
@@ -586,9 +682,12 @@ trap cleanup EXIT HUP INT TERM
     --silent \
     --show-error \
     --location \
+    --max-redirs 5 \
+    --proto '=https' \
+    --proto-redir '=https' \
     --cookie-jar "$cookies_file" \
     --output "$page_file" \
-    "$episode_url" \
+    "$url_without_query" \
     || fail "the Schatkamer episode page request failed"
 
 LC_ALL=C grep -aoE 'src="[^"]+\.js[^"]*"' "$page_file" \
@@ -610,6 +709,9 @@ while IFS= read -r chunk_path; do
         --silent \
         --show-error \
         --location \
+        --max-redirs 5 \
+        --proto '=https' \
+        --proto-redir '=https' \
         --cookie "$cookies_file" \
         --output "$chunk_file" \
         "https://schatkamer.beeldengeluid.nl$chunk_path" \
@@ -649,7 +751,7 @@ payload="[\"$video_id\",false]"
     --header 'Accept: text/x-component' \
     --data-binary "$payload" \
     --output "$response_file" \
-    "$episode_url" \
+    "$url_without_query" \
     || fail "the Schatkamer stream request failed"
 
 # RSC text chunks use "<row>:T<hex-size>,<content>". Locate each marker by
@@ -707,17 +809,18 @@ while IFS= read -r signed_url; do
     cookie_header="Cookie: CloudFront-Policy=$policy; CloudFront-Signature=$signature; CloudFront-Key-Pair-Id=$key_pair_id"
 
     # Keep stdout media-only. ErsatzRS forwards it as video/mp2t.
-    "$ffmpeg_bin" \
-        -nostdin \
-        -hide_banner \
-        -loglevel error \
-        -ss "$seek_position" \
-        -headers "$cookie_header" \
-        -i "$base_url" \
-        -map 0:v:0? \
-        -map 0:a:0? \
-        -c copy \
-        -f mpegts \
-        pipe:1 \
-        || fail "FFmpeg could not stream the signed HLS source"
+    if [ -n "$fragment_duration" ]; then
+        "$ffmpeg_bin" \
+            -nostdin -hide_banner -loglevel error \
+            -ss "$seek_position" -headers "$cookie_header" -i "$base_url" \
+            -t "$fragment_duration" -map 0:v:0? -map 0:a:0? \
+            -c copy -f mpegts pipe:1 \
+            || fail "FFmpeg could not stream the signed HLS fragment"
+    else
+        "$ffmpeg_bin" \
+            -nostdin -hide_banner -loglevel error \
+            -ss "$seek_position" -headers "$cookie_header" -i "$base_url" \
+            -map 0:v:0? -map 0:a:0? -c copy -f mpegts pipe:1 \
+            || fail "FFmpeg could not stream the signed HLS source"
+    fi
 done <"$streams_file"

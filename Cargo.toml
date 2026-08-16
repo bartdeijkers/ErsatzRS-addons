@@ -1,0 +1,15 @@
+[workspace]
+resolver = "2"
+members = ["tools/repository-publisher"]
+
+[workspace.package]
+edition = "2021"
+rust-version = "1.97.1"
+license = "Zlib"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = "warn"
+pedantic = "warn"

@@ -1,20 +1,13 @@
 from __future__ import annotations
 
-import datetime as dt
-import hashlib
-import importlib.util
 import json
 import pathlib
 import subprocess
 import tempfile
+import tomllib
 import unittest
-import zipfile
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-SPEC = importlib.util.spec_from_file_location("build_repository", ROOT / "tools" / "build_repository.py")
-BUILD_REPOSITORY = importlib.util.module_from_spec(SPEC)
-assert SPEC.loader is not None
-SPEC.loader.exec_module(BUILD_REPOSITORY)
 
 class RepositoryTests(unittest.TestCase):
     def final_operation_error(self, result: subprocess.CompletedProcess[str]) -> dict[str, str]:
@@ -104,71 +97,9 @@ cp "$source_file" "$output"
                 env=environment,
             )
 
-    def test_build_is_reproducible_and_catalog_hashes_match(self) -> None:
-        generated = dt.datetime(2026, 8, 11, 12, 0, tzinfo=dt.timezone.utc)
-        with (
-            tempfile.TemporaryDirectory() as first,
-            tempfile.TemporaryDirectory() as second,
-        ):
-            BUILD_REPOSITORY.build(
-                ROOT, pathlib.Path(first), 7, "https://example.test/addons", generated
-            )
-            BUILD_REPOSITORY.build(
-                ROOT, pathlib.Path(second), 7, "https://example.test/addons", generated
-            )
-            first_index = pathlib.Path(first, "index-v1.json").read_bytes()
-            self.assertEqual(first_index, pathlib.Path(second, "index-v1.json").read_bytes())
-            index = json.loads(first_index)
-            self.assertEqual(index["schema_version"], 2)
-            self.assertEqual(index["repository_id"], "org.ersatzrs.addons.official")
-            self.assertEqual(
-                {addon["id"] for addon in index["addons"]},
-                {
-                    "org.ersatzrs.addon.beeldengeluid",
-                    "org.ersatzrs.addon.yt-dlp",
-                },
-            )
-            for addon in index["addons"]:
-                self.assertEqual(addon["license"], "Zlib")
-                self.assertIn("stream", addon["summary"]["en-US"].lower())
-                self.assertEqual(addon["dependencies"], [])
-                self.assertEqual(set(addon["packages"]), {"any"})
-                if "icon" in addon:
-                    icon = addon["icon"]
-                    icon_filename = icon["url"].rsplit("/", 1)[1]
-                    icon_contents = pathlib.Path(first, "icons", icon_filename).read_bytes()
-                    self.assertEqual(hashlib.sha256(icon_contents).hexdigest(), icon["sha256"])
-                    self.assertEqual(len(icon_contents), icon["size"])
-                    self.assertEqual(icon["media_type"], "png")
-                for rid, package in addon["packages"].items():
-                    filename = package["url"].rsplit("/", 1)[1]
-                    contents = pathlib.Path(first, "packages", filename).read_bytes()
-                    self.assertEqual(hashlib.sha256(contents).hexdigest(), package["sha256"])
-                    self.assertEqual(len(contents), package["size"])
-                    with zipfile.ZipFile(pathlib.Path(first, "packages", filename)) as archive:
-                        self.assertIn("addon.toml", archive.namelist())
-                        if "icon" in addon:
-                            self.assertIn("icon.png", archive.namelist())
-                        self.assertEqual(archive.read("LICENSE"), (ROOT / "LICENSE").read_bytes())
-                        batch_files = [name for name in archive.namelist() if name.endswith(".bat")]
-                        for batch_file in batch_files:
-                            batch_contents = archive.read(batch_file)
-                            self.assertNotIn(b"\n", batch_contents.replace(b"\r\n", b""))
-            beeldengeluid = next(
-                addon
-                for addon in index["addons"]
-                if addon["id"] == "org.ersatzrs.addon.beeldengeluid"
-            )
-            self.assertNotIn("python", beeldengeluid["permissions"]["external_commands"])
-            self.assertNotIn("python3", beeldengeluid["permissions"]["external_commands"])
-            for package in beeldengeluid["packages"].values():
-                filename = package["url"].rsplit("/", 1)[1]
-                with zipfile.ZipFile(pathlib.Path(first, "packages", filename)) as archive:
-                    self.assertNotIn("libexec/beeldengeluid-media-list.py", archive.namelist())
-
     def test_beeldengeluid_has_minimal_runtime_configuration(self) -> None:
         addon_root = ROOT / "addons" / "org.ersatzrs.addon.beeldengeluid"
-        manifest = BUILD_REPOSITORY.tomllib.loads(
+        manifest = tomllib.loads(
             (addon_root / "addon.toml").read_text(encoding="utf-8")
         )
         self.assertEqual(
@@ -399,7 +330,7 @@ cp "$source_file" "$output"
         self.assertTrue(all(row["source_url"].startswith("https://") for row in rows[1:]))
 
     def test_yt_dlp_declares_file_backed_list_storage(self) -> None:
-        manifest = BUILD_REPOSITORY.tomllib.loads(
+        manifest = tomllib.loads(
             (
                 ROOT
                 / "addons"

@@ -16,20 +16,23 @@ The repository contains:
 The two streaming add-ons send video straight to ErsatzRS for immediate
 playback; no permanent file is written.
 
-Each package keeps its runtime self-contained below `addons/<id>/`. Python is
-used only by repository build and test tooling; it is not an add-on runtime
-dependency. Beeld & Geluid enumeration and playback are implemented directly
-for POSIX and Windows.
+Each package keeps its runtime self-contained below `addons/<id>/`. The
+repository publisher is Rust; Python remains only for source-level provider
+tests and is not an add-on runtime dependency. Beeld & Geluid enumeration and
+playback are implemented directly for POSIX and Windows.
 
 ## Build the unsigned repository
 
-Python 3.11 or newer is required only for release tooling:
+Rust 1.97.1 builds the unsigned repository. The publisher requires the pinned
+host validator so manifest and catalog checks use the same implementation as
+ErsatzRS:
 
 ```sh
-python3 tools/build_repository.py \
+cargo run --locked --package repository-publisher -- \
   --sequence 1 \
   --base-url https://bartdeijkers.github.io/ErsatzRS-addons \
-  --output dist
+  --output dist \
+  --validator tools/validator/ersatzrs-addon-validator-x86_64-unknown-linux-gnu
 ```
 
 This creates deterministic ZIP packages, bounded PNG icon assets, and the exact
@@ -50,6 +53,9 @@ the default repository is visible but intentionally cannot refresh.
 Run the source-level checks without contacting provider services:
 
 ```sh
+cargo fmt --all -- --check
+cargo clippy --all-targets -- -D warnings
+cargo test --locked
 python3 -m unittest discover -s tests
 ```
 

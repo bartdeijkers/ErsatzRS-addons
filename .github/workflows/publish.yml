@@ -24,14 +24,24 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@1.97.1
+      - name: Verify and run the pinned host contract validator
+        run: |
+          cd tools/validator
+          sha256sum --check SHA256SUMS
+          cd ../..
+          tools/validator/ersatzrs-addon-validator-x86_64-unknown-linux-gnu addons/*/addon.toml
       - name: Test repository tooling and entrypoints
-        run: python3 -m unittest discover -s tests
+        run: |
+          cargo test --locked
+          python3 -m unittest discover -s tests
       - name: Build packages and unsigned index
         run: >-
-          python3 tools/build_repository.py
+          cargo run --locked --package repository-publisher --
           --sequence "${GITHUB_RUN_NUMBER}"
           --base-url https://bartdeijkers.github.io/ErsatzRS-addons
           --output dist
+          --validator tools/validator/ersatzrs-addon-validator-x86_64-unknown-linux-gnu
       - name: Sign exact catalog bytes
         env:
           SIGNING_KEY_PEM: ${{ secrets.ADDON_REPOSITORY_SIGNING_KEY_PEM }}

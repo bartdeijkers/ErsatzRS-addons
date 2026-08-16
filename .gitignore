@@ -1,4 +1,5 @@
 /dist/
+/target/
 __pycache__/
 *.pyc
 *.pem

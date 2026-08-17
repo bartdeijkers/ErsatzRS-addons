@@ -434,6 +434,14 @@ cp "$source_file" "$output"
             self.assertIn("ffmpeg_i:-ss 25 -t 40", values)
             self.assertIn("https://video.example/watch?v=1", values)
             self.assertFalse(any("start=" in value or "end=" in value for value in values))
+            # A progressive rendition is served from a client-bound media URL
+            # that the managed FFmpeg downloader is refused when it fetches the
+            # URL itself, so an adaptive manifest has to be preferred.
+            selector = next(value for value in values if value.startswith("best["))
+            self.assertTrue(
+                selector.startswith("best[protocol^=m3u8]"),
+                f"manifest formats must be preferred, got {selector}",
+            )
 
     def test_yt_dlp_declares_its_javascript_runtime_on_both_platforms(self) -> None:
         manifest = tomllib.loads(

@@ -25,6 +25,13 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@1.97.1
+      # The yt-dlp package runs its metadata and playback helpers on deno.
+      # Without it the entrypoint tests covering those paths skip silently
+      # instead of failing, so the runtime must be present for the suite to
+      # mean anything.
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
       - name: Verify and run the pinned host contract validator
         run: |
           cd tools/validator

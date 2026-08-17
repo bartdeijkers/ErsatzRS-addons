@@ -31,7 +31,12 @@ const command = new Deno.Command(ytDlp, {
     "--downloader", "ffmpeg",
     "--downloader-args", `ffmpeg_i:${downloaderArgs.join(" ")}`,
     "--hls-use-mpegts",
-    "--format", "best[ext=mp4][vcodec*=avc1][acodec*=mp4a]/best[acodec!=none][vcodec!=none]",
+    // Prefer an adaptive manifest. A progressive rendition is served from a
+    // media URL bound to the requesting player client, which the managed
+    // FFmpeg downloader is refused when it fetches that URL itself; the
+    // manifest formats carry no such binding. The progressive renditions stay
+    // as fallbacks for sources that publish nothing else.
+    "--format", "best[protocol^=m3u8][vcodec!=none][acodec!=none]/best[ext=mp4][vcodec*=avc1][acodec*=mp4a]/best[acodec!=none][vcodec!=none]",
     "--output", "-",
     url.toString(),
   ],

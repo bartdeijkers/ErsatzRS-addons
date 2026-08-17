@@ -1,6 +1,6 @@
 manifest_version = 3
 id = "org.ersatzrs.addon.yt-dlp"
-version = "0.3.0"
+version = "0.4.0"
 license = "Zlib"
 source_url = "https://github.com/bartdeijkers/ErsatzRS-addons/tree/main/addons/org.ersatzrs.addon.yt-dlp"
 host_version = ">=0.1.0, <0.2.0"
@@ -36,6 +36,9 @@ id = "remote-stream.list.v1"
 id = "remote-stream.list.v2"
 
 [[capabilities]]
+id = "remote-stream.item.v2"
+
+[[capabilities]]
 id = "media-list.list.v1"
 
 [[capabilities]]
@@ -69,7 +72,7 @@ kind = "windows_batch"
 network_hosts = ["*"]
 media_read = false
 managed_ffmpeg = true
-external_commands = ["yt-dlp", "powershell.exe"]
+external_commands = ["yt-dlp", "powershell.exe", "deno"]
 
 [[settings]]
 key = "MEDIA_STORAGE_PATH"

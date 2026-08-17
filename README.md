@@ -11,7 +11,10 @@ The repository contains:
   episodes, public user-made lists, and saved searches, and streams their programmes. Its Remote
   Stream and media-list paths do not require Python or yt-dlp.
 - `org.ersatzrs.addon.yt-dlp`: streams a remote video through an
-  operator-installed yt-dlp and the ErsatzRS-managed FFmpeg runtime.
+  operator-installed yt-dlp and the ErsatzRS-managed FFmpeg runtime. It also
+  requires an operator-installed deno, the JavaScript runtime yt-dlp enables by
+  default; readiness reports its absence because playback cannot succeed
+  without it.
 
 The two streaming add-ons send video straight to ErsatzRS for immediate
 playback; no permanent file is written.

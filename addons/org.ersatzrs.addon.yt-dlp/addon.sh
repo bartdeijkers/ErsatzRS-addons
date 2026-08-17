@@ -5,6 +5,7 @@ set -f
 
 operation=${1:-}
 yt_dlp=${ERSATZRS_ADDON_SETTING_YT_DLP_BIN:-yt-dlp}
+js_runtime=deno
 
 have_program() {
     [ -x "$1" ] || command -v "$1" >/dev/null 2>&1
@@ -52,6 +53,12 @@ case "$operation" in
     check)
         if ! have_program "$yt_dlp" || ! have_program "$FFMPEG_BIN"; then
             printf '%s\n' '{"status":"unavailable","code":"missing-command","message":"yt-dlp or managed FFmpeg is unavailable."}'
+        elif ! have_program "$js_runtime"; then
+            # yt-dlp enables only this runtime by default. Without it the
+            # provider hands back a player response whose media URL is bound to
+            # a restricted client, and the managed FFmpeg downloader is refused
+            # when it fetches that URL, so playback cannot succeed.
+            printf '%s\n' '{"status":"unavailable","code":"missing-js-runtime","message":"A JavaScript runtime is required for playback and was not found."}'
         else
             printf '%s\n' '{"status":"ready","code":"ready","message":"yt-dlp Remote Streams is ready."}'
         fi
@@ -71,31 +78,55 @@ case "$operation" in
             enumerate_playlist \
                 '{"record_type":"item","provider_id":%(id)j,"rank":%(playlist_autonumber)d,"display_title":%(title)j,"title":%(title)j,"kind":"remote_stream","guids":["yt-dlp://%(id)s"],"source_url":%(webpage_url,original_url,url)j,"availability":%(ersatzrs_availability)j,"availability_reason":%(ersatzrs_unavailable&"not_playable"|null)s,"content_kind":%(ersatzrs_content_kind)j}' \
                 "$playlist_url"
+            exit 0
         fi
         enumerate_playlist \
             '{"id":%(id)j,"provider_id":%(id)j,"url":%(webpage_url,original_url,url)j,"title":%(title)j,"plot":%(description)j,"duration_seconds":%(duration)j,"year":%(release_year)j,"genres":%(categories)j,"tags":%(tags)j,"thumbnail_url":%(thumbnail)j,"availability":%(ersatzrs_availability)j,"availability_reason":%(ersatzrs_unavailable&"not_playable"|null)s,"content_kind":%(ersatzrs_content_kind)j,"guids":["yt-dlp://%(id)s"],"is_live":false}' \
             "$playlist_url"
         ;;
+    item)
+        [ -n "${ERSATZRS_REMOTE_STREAM_ITEM_IDS:-}" ] || fail missing-setting "At least one item identity is required." 64
+        # The host has already applied its item limit, filters, and exclusions,
+        # so this describes only the entries it kept. Unlike enumeration this
+        # is a full extraction, which is what makes the descriptive fields
+        # available at all.
+        metadata_file=$(mktemp)
+        trap 'rm -f "$metadata_file"' EXIT HUP INT TERM
+        if printf '%s\n' "$ERSATZRS_REMOTE_STREAM_ITEM_IDS" \
+            | while IFS= read -r item_id; do
+                  [ -n "$item_id" ] || continue
+                  case "$item_id" in
+                      *[\"\\]*|-*) continue ;;
+                  esac
+                  printf 'https://www.youtube.com/watch?v=%s\n' "$item_id"
+              done \
+            | "$yt_dlp" \
+                --no-config \
+                --no-update \
+                --quiet \
+                --no-playlist \
+                --ignore-errors \
+                --skip-download \
+                --dump-json \
+                --batch-file - >"$metadata_file"
+        then
+            if deno run --quiet "$(dirname "$0")/libexec/item-metadata.ts" <"$metadata_file"; then
+                rm -f "$metadata_file"
+                trap - EXIT HUP INT TERM
+                exit 0
+            fi
+            status=$?
+        else
+            status=$?
+        fi
+        rm -f "$metadata_file"
+        trap - EXIT HUP INT TERM
+        fail provider-unreachable "The video provider request failed." "$status"
+        ;;
     play)
         [ -n "${ERSATZRS_REMOTE_STREAM_URL:-}" ] || fail missing-setting "A remote stream URL is required." 64
-        seek=${ERSATZRS_REMOTE_STREAM_SEEK:-0}
-        case "$seek" in
-            ''|*[!0-9:.]*)
-                fail unsupported-url "The seek timestamp is invalid." 64
-                ;;
-        esac
-        if "$yt_dlp" \
-            --no-config \
-            --no-update \
-            --quiet \
-            --no-playlist \
-            --ffmpeg-location "$FFMPEG_BIN" \
-            --downloader ffmpeg \
-            --downloader-args "ffmpeg_i:-ss $seek" \
-            --hls-use-mpegts \
-            --format 'best[ext=mp4][vcodec*=avc1][acodec*=mp4a]/best[acodec!=none][vcodec!=none]' \
-            --output - \
-            "$ERSATZRS_REMOTE_STREAM_URL"
+        YT_DLP_BIN=$yt_dlp export YT_DLP_BIN
+        if deno run --quiet --allow-env --allow-run "$(dirname "$0")/libexec/fragment-playback.ts"
         then
             exit 0
         else

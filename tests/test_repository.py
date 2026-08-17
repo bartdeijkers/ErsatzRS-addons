@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
 import pathlib
+import shutil
 import subprocess
 import tempfile
 import tomllib
@@ -138,24 +140,132 @@ cp "$source_file" "$output"
 
     @unittest.skipUnless(pathlib.Path("/bin/sh").exists(), "POSIX shell required")
     def test_posix_readiness_contracts_emit_one_json_object(self) -> None:
-        for addon_id, extra in [
-            (
-                "org.ersatzrs.addon.beeldengeluid",
-                {"ERSATZRS_ADDON_SETTING_CURL_BIN": "/bin/true"},
-            ),
-            ("org.ersatzrs.addon.yt-dlp", {"ERSATZRS_ADDON_SETTING_YT_DLP_BIN": "/bin/true"}),
-        ]:
-            environment = {"PATH": "/usr/bin:/bin", "FFMPEG_BIN": "/bin/true", **extra}
+        with tempfile.TemporaryDirectory() as temporary:
+            # yt-dlp resolves its JavaScript runtime from PATH, so a ready
+            # result depends on one being discoverable.
+            runtime = pathlib.Path(temporary) / "deno"
+            runtime.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            runtime.chmod(0o755)
+            for addon_id, extra in [
+                (
+                    "org.ersatzrs.addon.beeldengeluid",
+                    {"ERSATZRS_ADDON_SETTING_CURL_BIN": "/bin/true"},
+                ),
+                ("org.ersatzrs.addon.yt-dlp", {"ERSATZRS_ADDON_SETTING_YT_DLP_BIN": "/bin/true"}),
+            ]:
+                environment = {
+                    "PATH": f"{temporary}:/usr/bin:/bin",
+                    "FFMPEG_BIN": "/bin/true",
+                    **extra,
+                }
+                result = subprocess.run(
+                    ["/bin/sh", str(ROOT / "addons" / addon_id / "addon.sh"), "check"],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    env=environment,
+                )
+                payload = json.loads(result.stdout)
+                self.assertEqual(payload["status"], "ready")
+                self.assertEqual(result.stderr, "")
+
+    @unittest.skipUnless(pathlib.Path("/bin/sh").exists(), "POSIX shell required")
+    def test_posix_yt_dlp_readiness_requires_a_javascript_runtime(self) -> None:
+        # An empty PATH guarantees the runtime is absent regardless of what the
+        # host machine happens to have installed.
+        with tempfile.TemporaryDirectory() as temporary:
             result = subprocess.run(
-                ["/bin/sh", str(ROOT / "addons" / addon_id / "addon.sh"), "check"],
+                ["/bin/sh", str(ROOT / "addons" / "org.ersatzrs.addon.yt-dlp" / "addon.sh"), "check"],
                 check=True,
                 capture_output=True,
                 text=True,
-                env=environment,
+                env={
+                    "PATH": temporary,
+                    "FFMPEG_BIN": "/bin/true",
+                    "ERSATZRS_ADDON_SETTING_YT_DLP_BIN": "/bin/true",
+                },
             )
-            payload = json.loads(result.stdout)
-            self.assertEqual(payload["status"], "ready")
-            self.assertEqual(result.stderr, "")
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "unavailable")
+        self.assertEqual(payload["code"], "missing-js-runtime")
+        self.assertEqual(result.stderr, "")
+
+    @unittest.skipUnless(pathlib.Path("/bin/sh").exists(), "POSIX shell required")
+    def test_posix_yt_dlp_media_list_mode_emits_only_media_list_records(self) -> None:
+        # Regression: the media-list branch used to fall through into the
+        # Remote Stream branch, so one invocation emitted two incompatible
+        # record shapes and enumerated the provider twice.
+        with tempfile.TemporaryDirectory() as temporary:
+            calls = pathlib.Path(temporary) / "calls"
+            item = (
+                '{"record_type":"item","provider_id":"video-1","rank":1,'
+                '"display_title":"One","title":"One","kind":"remote_stream",'
+                '"guids":[],"source_url":"https://video.example/watch?v=1"}'
+            )
+            definition = (
+                '{"id":"video-1","provider_id":"video-1",'
+                '"url":"https://video.example/watch?v=1","title":"One","is_live":false}'
+            )
+            # Stand in for the two different --print templates: the media-list
+            # branch on the first invocation, the Remote Stream branch on any
+            # second one. Falling through therefore produces a record the media
+            # list contract rejects, exactly as it did against the real provider.
+            fake = pathlib.Path(temporary) / "yt-dlp"
+            fake.write_text(
+                "#!/bin/sh\n"
+                f"echo x >> {calls}\n"
+                f'if [ "$(wc -l < {calls})" = "1" ]; then\n'
+                f"    printf '%s\\n' '{item}'\n"
+                "else\n"
+                f"    printf '%s\\n' '{definition}'\n"
+                "fi\n",
+                encoding="utf-8",
+            )
+            fake.chmod(0o755)
+            result = subprocess.run(
+                ["/bin/sh", str(ROOT / "addons" / "org.ersatzrs.addon.yt-dlp" / "addon.sh"), "list"],
+                check=True,
+                capture_output=True,
+                text=True,
+                env={
+                    "PATH": "/usr/bin:/bin",
+                    "FFMPEG_BIN": "/bin/true",
+                    "ERSATZRS_ADDON_SETTING_YT_DLP_BIN": str(fake),
+                    "ERSATZRS_MEDIA_LIST_URL": "https://video.example/playlist",
+                },
+            )
+            invocations = calls.read_text(encoding="utf-8").splitlines()
+        rows = [json.loads(line) for line in result.stdout.splitlines()]
+        self.assertTrue(all("record_type" in row for row in rows))
+        self.assertEqual(rows[0]["record_type"], "list")
+        self.assertEqual(len(invocations), 1)
+
+    @unittest.skipUnless(pathlib.Path("/bin/sh").exists(), "POSIX shell required")
+    def test_posix_yt_dlp_remote_stream_mode_emits_no_media_list_records(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            definition = (
+                '{"id":"video-1","provider_id":"video-1",'
+                '"url":"https://video.example/watch?v=1","title":"One","is_live":false}'
+            )
+            fake = pathlib.Path(temporary) / "yt-dlp"
+            fake.write_text(
+                f"#!/bin/sh\nprintf '%s\\n' '{definition}'\n", encoding="utf-8"
+            )
+            fake.chmod(0o755)
+            result = subprocess.run(
+                ["/bin/sh", str(ROOT / "addons" / "org.ersatzrs.addon.yt-dlp" / "addon.sh"), "list"],
+                check=True,
+                capture_output=True,
+                text=True,
+                env={
+                    "PATH": "/usr/bin:/bin",
+                    "FFMPEG_BIN": "/bin/true",
+                    "ERSATZRS_ADDON_SETTING_YT_DLP_BIN": str(fake),
+                    "ERSATZRS_REMOTE_STREAM_PLAYLIST_URL": "https://video.example/playlist",
+                },
+            )
+        self.assertNotIn("record_type", result.stdout)
+        self.assertTrue(result.stdout.strip())
 
     @unittest.skipUnless(pathlib.Path("/bin/sh").exists(), "POSIX shell required")
     def test_posix_operations_emit_structured_final_stderr_lines(self) -> None:
@@ -198,6 +308,145 @@ cp "$source_file" "$output"
             source = (ROOT / "addons" / addon_id / "addon.bat").read_text(encoding="utf-8")
             for code in ["missing-setting", "provider-unreachable", "operation-failed"]:
                 self.assertIn(code, source)
+
+    @unittest.skipUnless(pathlib.Path("/bin/sh").exists(), "POSIX shell required")
+    def test_posix_yt_dlp_item_requires_at_least_one_identity(self) -> None:
+        result = subprocess.run(
+            ["/bin/sh", str(ROOT / "addons" / "org.ersatzrs.addon.yt-dlp" / "addon.sh"), "item"],
+            check=False,
+            capture_output=True,
+            text=True,
+            env={
+                "PATH": "/usr/bin:/bin",
+                "FFMPEG_BIN": "/bin/true",
+                "ERSATZRS_ADDON_SETTING_YT_DLP_BIN": "/bin/true",
+            },
+        )
+        self.assertEqual(self.final_operation_error(result)["code"], "missing-setting")
+
+    def test_yt_dlp_declares_the_item_metadata_capability(self) -> None:
+        manifest = tomllib.loads(
+            (ROOT / "addons" / "org.ersatzrs.addon.yt-dlp" / "addon.toml").read_text(
+                encoding="utf-8"
+            )
+        )
+        capabilities = [entry["id"] for entry in manifest["capabilities"]]
+        self.assertIn("remote-stream.item.v2", capabilities)
+        source = (ROOT / "addons" / "org.ersatzrs.addon.yt-dlp" / "addon.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("ERSATZRS_REMOTE_STREAM_ITEM_IDS", source)
+        # Enrichment must be a full extraction; a flat listing is what omits
+        # the descriptive fields in the first place.
+        item_branch = source.split("    item)", 1)[1].split("    play)", 1)[0]
+        self.assertNotIn("--flat-playlist", item_branch)
+        self.assertIn("--skip-download", item_branch)
+        self.assertIn("--dump-json", item_branch)
+
+    @unittest.skipUnless(shutil.which("deno"), "deno required")
+    def test_yt_dlp_item_metadata_formats_sparse_fractional_chapters(self) -> None:
+        source = ROOT / "addons" / "org.ersatzrs.addon.yt-dlp" / "libexec" / "item-metadata.ts"
+        result = subprocess.run(
+            ["deno", "run", "--quiet", str(source)],
+            input=json.dumps({
+                "id": "video-1",
+                "availability": "public",
+                "chapters": [
+                    {"start_time": 0.2, "title": " Intro "},
+                    {"start_time": 19.6, "title": "Sculpt Mode"},
+                ],
+            }) + "\n",
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        row = json.loads(result.stdout)
+        self.assertEqual(row["chapter_input"], "0:00 Intro\n0:20 Sculpt Mode")
+
+        no_chapters = subprocess.run(
+            ["deno", "run", "--quiet", str(source)],
+            input=json.dumps({"id": "video-2", "chapters": None}) + "\n",
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        self.assertNotIn("chapter_input", json.loads(no_chapters.stdout))
+
+    @unittest.skipUnless(pathlib.Path("/bin/sh").exists() and shutil.which("deno"), "POSIX shell and deno required")
+    def test_posix_yt_dlp_chapter_enrichment_uses_one_full_extraction(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            calls = root / "calls"
+            fake = root / "yt-dlp"
+            fake.write_text(
+                "#!/bin/sh\nprintf x >> \"$CALLS\"\nprintf '%s\\n' '{\"id\":\"video-1\",\"availability\":\"public\",\"chapters\":[{\"start_time\":0,\"title\":\"Intro\"}]}'\n",
+                encoding="utf-8",
+            )
+            fake.chmod(0o755)
+            result = subprocess.run(
+                ["/bin/sh", str(ROOT / "addons" / "org.ersatzrs.addon.yt-dlp" / "addon.sh"), "item"],
+                check=True,
+                capture_output=True,
+                text=True,
+                env={
+                    **os.environ,
+                    "CALLS": str(calls),
+                    "ERSATZRS_ADDON_SETTING_YT_DLP_BIN": str(fake),
+                    "ERSATZRS_REMOTE_STREAM_ITEM_IDS": "video-1",
+                },
+            )
+            self.assertEqual(calls.read_text(encoding="utf-8"), "x")
+            self.assertEqual(json.loads(result.stdout)["chapter_input"], "0:00 Intro")
+
+    def test_yt_dlp_chapter_rounding_is_owned_by_both_package_entrypoints(self) -> None:
+        posix = (ROOT / "addons" / "org.ersatzrs.addon.yt-dlp" / "libexec" / "item-metadata.ts").read_text(encoding="utf-8")
+        windows = (ROOT / "addons" / "org.ersatzrs.addon.yt-dlp" / "libexec" / "item-metadata.ps1").read_text(encoding="utf-8")
+        self.assertIn("Math.round", posix)
+        self.assertIn("[Math]::Round", windows)
+        self.assertIn("chapter_input", posix)
+        self.assertIn("chapter_input", windows)
+
+    @unittest.skipUnless(pathlib.Path("/bin/sh").exists() and shutil.which("deno"), "POSIX shell and deno required")
+    def test_fragment_playback_strips_bounds_and_applies_seek_and_duration(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            arguments = root / "arguments"
+            fake = root / "yt-dlp"
+            fake.write_text(
+                "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$ARGUMENTS\"\n",
+                encoding="utf-8",
+            )
+            fake.chmod(0o755)
+            script = ROOT / "addons" / "org.ersatzrs.addon.yt-dlp" / "libexec" / "fragment-playback.ts"
+            subprocess.run(
+                ["deno", "run", "--quiet", "--allow-env", "--allow-run", str(script)],
+                check=True,
+                env={
+                    **os.environ,
+                    "ARGUMENTS": str(arguments),
+                    "YT_DLP_BIN": str(fake),
+                    "FFMPEG_BIN": "/managed/ffmpeg",
+                    "ERSATZRS_REMOTE_STREAM_URL": "https://video.example/watch?v=1&start=20&end=65",
+                    "ERSATZRS_REMOTE_STREAM_SEEK": "00:00:05",
+                },
+            )
+            values = arguments.read_text(encoding="utf-8").splitlines()
+            self.assertIn("ffmpeg_i:-ss 25 -t 40", values)
+            self.assertIn("https://video.example/watch?v=1", values)
+            self.assertFalse(any("start=" in value or "end=" in value for value in values))
+
+    def test_yt_dlp_declares_its_javascript_runtime_on_both_platforms(self) -> None:
+        manifest = tomllib.loads(
+            (ROOT / "addons" / "org.ersatzrs.addon.yt-dlp" / "addon.toml").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertIn("deno", manifest["permissions"]["external_commands"])
+        windows = (ROOT / "addons" / "org.ersatzrs.addon.yt-dlp" / "addon.bat").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("missing-js-runtime", windows)
+        self.assertIn("deno.exe", windows)
 
     @unittest.skipUnless(pathlib.Path("/bin/sh").exists(), "POSIX shell required")
     def test_posix_beeldengeluid_names_a_shared_list_after_the_list_itself(self) -> None:

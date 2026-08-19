@@ -1,9 +1,14 @@
-manifest_version = 3
+manifest_version = 4
 id = "org.ersatzrs.addon.beeldengeluid"
-version = "0.5.0"
+version = "0.6.0"
 license = "Zlib"
 source_url = "https://github.com/bartdeijkers/ErsatzRS-addons/tree/main/addons/org.ersatzrs.addon.beeldengeluid"
 host_version = ">=0.1.0, <0.2.0"
+
+# Hosts this package offers to process for an operator-supplied source URL.
+# Narrower than permissions.network_hosts on purpose: the CDN is contacted for
+# media, but it is never a list or episode source an operator pastes.
+default_source_hosts = ["schatkamer.beeldengeluid.nl"]
 
 [icon]
 path = "icon.png"

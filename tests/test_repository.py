@@ -670,7 +670,7 @@ cp "$source_file" "$output"
                 / "addon.toml"
             ).read_text(encoding="utf-8")
         )
-        self.assertEqual(manifest["manifest_version"], 3)
+        self.assertEqual(manifest["manifest_version"], 4)
         self.assertTrue(
             {
                 "media-list.list.v1",

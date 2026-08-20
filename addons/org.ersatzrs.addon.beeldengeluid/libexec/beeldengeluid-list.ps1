@@ -103,7 +103,7 @@ try {
                     }
                 }
                 [Console]::Error.WriteLine(
-                    'beeldengeluid.bat: result page {0} yielded {1} new episode(s)' -f $page, $added
+                    ('beeldengeluid.bat: result page {0} yielded {1} new episode(s)' -f $page, $added)
                 )
                 if ($added -eq 0) { break }
             }
@@ -122,7 +122,7 @@ try {
                     )) { throw 'shared list is unavailable or private' }
                     $nameMatch = [regex]::Match(
                         $html,
-                        '\\\x22title\\\x22:\\\x22(.*?)\\\x22,\\\x22description\\\x22:\\\x22Gedeelde lijst\\\x22'
+                        '\\\x22title\\\x22:\\\x22([^\\\x22]*)\\\x22,\\\x22description\\\x22:\\\x22Gedeelde lijst\\\x22'
                     )
                     if ($nameMatch.Success) {
                         $sharedListName = $nameMatch.Groups[1].Value.
@@ -144,7 +144,7 @@ try {
                     }
                 }
                 [Console]::Error.WriteLine(
-                    'beeldengeluid.bat: shared-list page {0} yielded {1} new item(s)' -f $page, $added
+                    ('beeldengeluid.bat: shared-list page {0} yielded {1} new item(s)' -f $page, $added)
                 )
                 if ($added -eq 0) { break }
             }

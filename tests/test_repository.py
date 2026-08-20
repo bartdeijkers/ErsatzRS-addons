@@ -816,10 +816,19 @@ printf '%s\n' '{"record_type":"item","provider_id":"video-1","rank":1,"display_t
         self.assertIn("record_type = 'list'", source)
         self.assertIn("record_type = 'item'", source)
         self.assertIn("Gedeelde lijst", source)
+        self.assertIn(r"([^\\\x22]*)\\\x22,\\\x22description", source)
         self.assertIn("$sharedListName", source)
         self.assertIn("name = $listName", source)
         self.assertIn("isPlayable", source)
         self.assertIn("$seen.Add($path)", source)
+        self.assertIn(
+            "('beeldengeluid.bat: result page {0} yielded {1} new episode(s)' -f $page, $added)",
+            source,
+        )
+        self.assertIn(
+            "('beeldengeluid.bat: shared-list page {0} yielded {1} new item(s)' -f $page, $added)",
+            source,
+        )
         self.assertIn("retained {0} unavailable Schatkamer shared-list item(s)", source)
         self.assertIn("availability_reason = 'not_playable'", source)
         self.assertIn("content_kind = 'auto'", source)

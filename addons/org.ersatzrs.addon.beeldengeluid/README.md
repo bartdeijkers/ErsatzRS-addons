@@ -5,7 +5,9 @@ link as NDJSON and streams individual episodes as MPEG-TS. Its Unix and Windows
 Remote Stream implementations perform the complete provider flow directly;
 they do not require Python, yt-dlp, browser cookies, or stored media URLs. The
 same platform scripts emit both the Remote Stream and provider-neutral media-list
-contracts directly.
+contracts directly. Media-list v4 supplies list and item titles, summaries,
+classification, credits, provenance, and artwork candidates to ErsatzRS's
+shared metadata review editor on Windows and POSIX platforms.
 
 Video is streamed straight through ErsatzRS for immediate playback; no
 permanent file is written.

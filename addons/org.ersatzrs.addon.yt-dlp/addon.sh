@@ -49,6 +49,26 @@ enumerate_playlist() {
     fi
 }
 
+enumerate_media_list() {
+    playlist_url=$1
+    if "$yt_dlp" \
+        --no-config \
+        --no-update \
+        --quiet \
+        --skip-download \
+        --ignore-errors \
+        --dump-single-json \
+        "$playlist_url" \
+        | deno run --quiet --allow-env=ERSATZRS_MEDIA_LIST_URL,PLAYLIST_URL \
+            "$(dirname "$0")/libexec/media-list.ts"
+    then
+        return 0
+    else
+        status=$?
+        fail provider-unreachable "The video provider request failed." "$status"
+    fi
+}
+
 case "$operation" in
     check)
         if ! have_program "$yt_dlp" || ! have_program "$FFMPEG_BIN"; then
@@ -74,10 +94,7 @@ case "$operation" in
             *[\"\\]*) fail unsupported-url "The playlist URL contains unsupported characters." 64 ;;
         esac
         if [ -n "${ERSATZRS_MEDIA_LIST_URL:-}" ]; then
-            printf '%s\n' "{\"record_type\":\"list\",\"provider_id\":\"$playlist_url\",\"name\":\"yt-dlp playlist\",\"description\":\"Remote videos selected by the supplied playlist link.\"}"
-            enumerate_playlist \
-                '{"record_type":"item","provider_id":%(id)j,"rank":%(playlist_autonumber)d,"display_title":%(title)j,"title":%(title)j,"kind":"remote_stream","guids":["yt-dlp://%(id)s"],"source_url":%(webpage_url,original_url,url)j,"availability":%(ersatzrs_availability)j,"availability_reason":%(ersatzrs_unavailable&"not_playable"|null)s,"content_kind":%(ersatzrs_content_kind)j}' \
-                "$playlist_url"
+            enumerate_media_list "$playlist_url"
             exit 0
         fi
         enumerate_playlist \

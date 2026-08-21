@@ -190,32 +190,34 @@ cp "$source_file" "$output"
         self.assertEqual(payload["code"], "missing-js-runtime")
         self.assertEqual(result.stderr, "")
 
-    @unittest.skipUnless(pathlib.Path("/bin/sh").exists(), "POSIX shell required")
+    @unittest.skipUnless(
+        pathlib.Path("/bin/sh").exists() and shutil.which("deno"),
+        "POSIX shell and deno required",
+    )
     def test_posix_yt_dlp_media_list_mode_emits_only_media_list_records(self) -> None:
         # Regression: the media-list branch used to fall through into the
         # Remote Stream branch, so one invocation emitted two incompatible
         # record shapes and enumerated the provider twice.
         with tempfile.TemporaryDirectory() as temporary:
             calls = pathlib.Path(temporary) / "calls"
-            item = (
-                '{"record_type":"item","provider_id":"video-1","rank":1,'
-                '"display_title":"One","title":"One","kind":"remote_stream",'
-                '"guids":[],"source_url":"https://video.example/watch?v=1"}'
+            playlist = (
+                '{"title":"Fixture playlist","entries":[{'
+                '"id":"video-1","title":"One",'
+                '"webpage_url":"https://video.example/watch?v=1",'
+                '"availability":"public"}]}'
             )
             definition = (
                 '{"id":"video-1","provider_id":"video-1",'
                 '"url":"https://video.example/watch?v=1","title":"One","is_live":false}'
             )
-            # Stand in for the two different --print templates: the media-list
-            # branch on the first invocation, the Remote Stream branch on any
-            # second one. Falling through therefore produces a record the media
-            # list contract rejects, exactly as it did against the real provider.
+            # Stand in for full yt-dlp JSON on the first invocation and the
+            # Remote Stream shape on any accidental second invocation.
             fake = pathlib.Path(temporary) / "yt-dlp"
             fake.write_text(
                 "#!/bin/sh\n"
                 f"echo x >> {calls}\n"
                 f'if [ "$(wc -l < {calls})" = "1" ]; then\n'
-                f"    printf '%s\\n' '{item}'\n"
+                f"    printf '%s\\n' '{playlist}'\n"
                 "else\n"
                 f"    printf '%s\\n' '{definition}'\n"
                 "fi\n",
@@ -228,7 +230,7 @@ cp "$source_file" "$output"
                 capture_output=True,
                 text=True,
                 env={
-                    "PATH": "/usr/bin:/bin",
+                    "PATH": f"{pathlib.Path(shutil.which('deno') or '/usr/bin').parent}:/usr/bin:/bin",
                     "FFMPEG_BIN": "/bin/true",
                     "ERSATZRS_ADDON_SETTING_YT_DLP_BIN": str(fake),
                     "ERSATZRS_MEDIA_LIST_URL": "https://video.example/playlist",
@@ -258,7 +260,7 @@ cp "$source_file" "$output"
                 capture_output=True,
                 text=True,
                 env={
-                    "PATH": "/usr/bin:/bin",
+                    "PATH": f"{pathlib.Path(shutil.which('deno') or '/usr/bin').parent}:/usr/bin:/bin",
                     "FFMPEG_BIN": "/bin/true",
                     "ERSATZRS_ADDON_SETTING_YT_DLP_BIN": str(fake),
                     "ERSATZRS_REMOTE_STREAM_PLAYLIST_URL": "https://video.example/playlist",
@@ -292,7 +294,7 @@ cp "$source_file" "$output"
                 capture_output=True,
                 text=True,
                 env={
-                    "PATH": "/usr/bin:/bin",
+                    "PATH": f"{pathlib.Path(shutil.which('deno') or '/usr/bin').parent}:/usr/bin:/bin",
                     "FFMPEG_BIN": "/bin/true",
                     "ERSATZRS_ADDON_SETTING_YT_DLP_BIN": str(fake),
                     "ERSATZRS_MEDIA_LIST_URL": "https://video.example/playlist",
@@ -690,7 +692,10 @@ cp "$source_file" "$output"
             },
         )
 
-    @unittest.skipUnless(pathlib.Path("/bin/sh").exists(), "POSIX shell required")
+    @unittest.skipUnless(
+        pathlib.Path("/bin/sh").exists() and shutil.which("deno"),
+        "POSIX shell and deno required",
+    )
     def test_posix_yt_dlp_projects_playlist_as_remote_stream_records(self) -> None:
         addon = ROOT / "addons" / "org.ersatzrs.addon.yt-dlp" / "addon.sh"
         with tempfile.TemporaryDirectory() as temporary:
@@ -699,7 +704,7 @@ cp "$source_file" "$output"
             fake.write_text(
                 """#!/bin/sh
 printf '%s\n' "$@" > "$FAKE_ARGUMENTS"
-printf '%s\n' '{"record_type":"item","provider_id":"video-1","rank":1,"display_title":"Fixture","title":"Fixture","kind":"remote_stream","guids":[],"source_url":"https://video.example/watch?v=1"}'
+printf '%s\n' '{"title":"Fixture playlist","description":"Fixture list description","channel":"Fixture Channel","entries":[{"id":"video-1","title":"Fixture","description":"Fixture description","webpage_url":"https://video.example/watch?v=1","availability":"public","duration":42,"upload_date":"20240821","categories":["Documentary"],"tags":["archive"],"channel":"Fixture Channel","thumbnail":"https://images.example.test/thumb.jpg"}]}'
 """,
                 encoding="utf-8",
             )
@@ -710,7 +715,7 @@ printf '%s\n' '{"record_type":"item","provider_id":"video-1","rank":1,"display_t
                 capture_output=True,
                 text=True,
                 env={
-                    "PATH": "/usr/bin:/bin",
+                    "PATH": f"{pathlib.Path(shutil.which('deno') or '/usr/bin').parent}:/usr/bin:/bin",
                     "FFMPEG_BIN": "/bin/true",
                     "ERSATZRS_ADDON_SETTING_YT_DLP_BIN": str(fake),
                     "ERSATZRS_MEDIA_LIST_URL": "https://video.example/playlist?id=fixture",
@@ -723,6 +728,9 @@ printf '%s\n' '{"record_type":"item","provider_id":"video-1","rank":1,"display_t
         self.assertEqual(rows[0]["record_type"], "list")
         self.assertEqual(rows[1]["kind"], "remote_stream")
         self.assertEqual(rows[1]["source_url"], "https://video.example/watch?v=1")
+        self.assertEqual(rows[1]["metadata"]["release_date"], "2024-08-21")
+        self.assertEqual(rows[1]["metadata"]["people"][0]["name"], "Fixture Channel")
+        self.assertEqual(rows[1]["metadata"]["artwork"][0]["role"], "thumb")
 
         source = addon.read_text(encoding="utf-8")
         windows_source = (
@@ -747,8 +755,94 @@ printf '%s\n' '{"record_type":"item","provider_id":"video-1","rank":1,"display_t
         )
         self.assertIn("genres = $genres", windows_source)
         self.assertIn("tags = $tags", windows_source)
-        self.assertIn("%(ersatzrs_availability)j", yt_dlp_arguments)
-        self.assertNotIn("%(availability)j", yt_dlp_arguments)
+        self.assertIn("--dump-single-json", yt_dlp_arguments)
+        self.assertIn("--skip-download", yt_dlp_arguments)
+        self.assertNotIn("--flat-playlist", yt_dlp_arguments)
+
+    @unittest.skipUnless(shutil.which("deno"), "deno required")
+    def test_yt_dlp_v4_transformer_maps_complete_shared_metadata(self) -> None:
+        transformer = (
+            ROOT
+            / "addons"
+            / "org.ersatzrs.addon.yt-dlp"
+            / "libexec"
+            / "media-list.ts"
+        )
+        fixture = {
+            "title": "RLM - Highlights",
+            "description": "Playlist description",
+            "channel": "RedLetterMedia",
+            "thumbnail": "https://images.example.test/list.webp",
+            "entries": [
+                {
+                    "id": "video-1",
+                    "title": "Highlight",
+                    "description": "Item description",
+                    "webpage_url": "https://www.youtube.com/watch?v=video-1",
+                    "availability": "public",
+                    "duration": 342.4,
+                    "upload_date": "20240718",
+                    "categories": ["Entertainment"],
+                    "tags": ["redlettermedia", "highlight"],
+                    "channel": "RedLetterMedia",
+                    "uploader": "RLM",
+                    "thumbnail": "https://images.example.test/item.webp",
+                    "thumbnail_width": 1280,
+                    "thumbnail_height": 720,
+                }
+            ],
+        }
+        environment = os.environ.copy()
+        environment["ERSATZRS_MEDIA_LIST_URL"] = (
+            "https://www.youtube.com/playlist?list=fixture"
+        )
+        result = subprocess.run(
+            [
+                "deno",
+                "run",
+                "--quiet",
+                "--allow-env=ERSATZRS_MEDIA_LIST_URL,PLAYLIST_URL",
+                str(transformer),
+            ],
+            input=json.dumps(fixture),
+            check=False,
+            capture_output=True,
+            text=True,
+            env=environment,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        rows = [json.loads(line) for line in result.stdout.splitlines()]
+        self.assertEqual(rows[0]["metadata"]["title"], "RLM - Highlights")
+        self.assertEqual(rows[0]["metadata"]["people"][0]["role"], "Channel")
+        metadata = rows[1]["metadata"]
+        self.assertEqual(metadata["release_date"], "2024-07-18")
+        self.assertEqual(metadata["year"], 2024)
+        self.assertEqual(metadata["genres"], ["Entertainment"])
+        self.assertEqual(metadata["tags"], ["redlettermedia", "highlight"])
+        self.assertEqual(metadata["broadcasters"], ["RedLetterMedia"])
+        self.assertEqual(
+            metadata["people"],
+            [
+                {"name": "RedLetterMedia", "role": "Channel", "order": 0},
+                {"name": "RLM", "role": "Uploader", "order": 1},
+            ],
+        )
+        self.assertEqual(metadata["artwork"][0]["role"], "thumb")
+        self.assertEqual(metadata["artwork"][0]["width"], 1280)
+        self.assertEqual(rows[1]["duration_seconds"], 342)
+
+        posix_source = (
+            ROOT / "addons" / "org.ersatzrs.addon.yt-dlp" / "addon.sh"
+        ).read_text(encoding="utf-8")
+        windows_source = (
+            ROOT
+            / "addons"
+            / "org.ersatzrs.addon.yt-dlp"
+            / "libexec"
+            / "youtube-list.ps1"
+        ).read_text(encoding="utf-8")
+        self.assertIn("media-list.ts", posix_source)
+        self.assertIn("media-list.ts", windows_source)
 
     def test_yt_dlp_normalizes_provider_availability_on_both_platforms(self) -> None:
         source = (
@@ -833,6 +927,44 @@ printf '%s\n' '{"record_type":"item","provider_id":"video-1","rank":1,"display_t
         self.assertIn("availability_reason = 'not_playable'", source)
         self.assertIn("content_kind = 'auto'", source)
         self.assertIn("$slug", source)
+
+    @unittest.skipUnless(
+        os.name == "nt" and (shutil.which("powershell.exe") or shutil.which("pwsh")),
+        "native Windows PowerShell required",
+    )
+    def test_windows_beeldengeluid_decodes_quoted_programme_descriptions(self) -> None:
+        powershell = shutil.which("powershell.exe") or shutil.which("pwsh")
+        helper = (
+            ROOT
+            / "addons"
+            / "org.ersatzrs.addon.beeldengeluid"
+            / "libexec"
+            / "beeldengeluid-json.ps1"
+        )
+        environment = os.environ.copy()
+        environment["ERSATZRS_TEST_HELPER"] = str(helper)
+        environment["ERSATZRS_TEST_ESCAPED_JSON"] = (
+            r'\"What does a \\\"portrait\\\" cost?\\nNext\"'
+        )
+        result = subprocess.run(
+            [
+                powershell,
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                ". $env:ERSATZRS_TEST_HELPER; "
+                "ConvertFrom-EscapedJsonValue $env:ERSATZRS_TEST_ESCAPED_JSON",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+            env=environment,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), 'What does a "portrait" cost?\nNext')
 
 
 if __name__ == "__main__":

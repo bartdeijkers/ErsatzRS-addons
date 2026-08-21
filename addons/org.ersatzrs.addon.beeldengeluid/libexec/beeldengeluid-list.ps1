@@ -1,4 +1,5 @@
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'beeldengeluid-json.ps1')
 
 function JsonSlice([string]$html, [string]$start, [string]$end) {
     $pattern = '\\' + [char]34 + [regex]::Escape($start) + '\\' + [char]34 +
@@ -167,8 +168,16 @@ try {
                 provider_id = $uri.AbsolutePath.Trim('/') + $uri.Query
                 name = $listName
                 description = $listDescription
+                metadata = [ordered]@{
+                    title = $listName
+                    plot = $listDescription
+                    artwork = if ($listImage) {
+                        @([ordered]@{ role = 'poster'; url = $listImage })
+                    } else { @() }
+                    guids = @('beeldengeluid-list://' + $uri.AbsolutePath.Trim('/'))
+                }
             }
-            $mediaListRows.Add(($listRecord | ConvertTo-Json -Compress))
+            $mediaListRows.Add(($listRecord | ConvertTo-Json -Depth 5 -Compress))
         }
         $rank = 0
         foreach ($path in $paths) {
@@ -199,6 +208,10 @@ try {
                         availability = 'unavailable'
                         availability_reason = 'not_playable'
                         content_kind = 'auto'
+                        metadata = [ordered]@{
+                            title = $title
+                            guids = @('beeldengeluid://' + $episodeId)
+                        }
                     }
                     $mediaListRows.Add(($item | ConvertTo-Json -Depth 2 -Compress))
                     $rank++
@@ -246,10 +259,11 @@ try {
             } else { $null }
             $descriptionRaw = JsonSlice $programHtml 'description' 'disclaimer'
             $plot = $null
-            if ($descriptionRaw -and $descriptionRaw.Length -ge 4) {
-                $jsonDescription = $descriptionRaw.Remove($descriptionRaw.Length - 2, 1).Remove(0, 1)
-                $plot = $jsonDescription.Replace('\\', '\') | ConvertFrom-Json
-                $plot = $plot.Replace("`r", ' ').Replace("`n", ' ').Replace("`t", ' ')
+            if ($descriptionRaw) {
+                $plot = [string](ConvertFrom-EscapedJsonValue $descriptionRaw)
+                $plot = [Net.WebUtility]::HtmlDecode(
+                    $plot.Replace("`r", ' ').Replace("`n", ' ').Replace("`t", ' ')
+                )
             }
             $ageMatches = [regex]::Matches(
                 $programHtml,
@@ -352,7 +366,28 @@ try {
                 if ($published) { $item.year = [int]$published.Substring(0, 4) }
                 if ($duration.Success) { $item.duration_seconds = [int64]$duration.Groups[1].Value }
                 if ($episodeImage) { $item.additional_image_urls = @($episodeImage) }
-                $mediaListRows.Add(($item | ConvertTo-Json -Depth 2 -Compress))
+                $item.metadata = [ordered]@{
+                    title = $title
+                    plot = $plot
+                    show_title = if ($series) { $series } else { $null }
+                    year = if ($published) { [int]$published.Substring(0, 4) } else { $null }
+                    release_date = $published
+                    content_ratings = if ($rating) { @($rating) } else { @() }
+                    genres = $genres
+                    tags = $subjects
+                    people = $people
+                    producers = $producers
+                    original_broadcasters = $originalBroadcasters
+                    broadcasters = $broadcasters
+                    collection = if ($collectionMatch.Success) {
+                        [Net.WebUtility]::HtmlDecode($collectionMatch.Groups[1].Value)
+                    } else { $null }
+                    artwork = if ($episodeImage) {
+                        @([ordered]@{ role = 'thumb'; url = $episodeImage })
+                    } else { @() }
+                    guids = @('beeldengeluid://' + $episodeId)
+                }
+                $mediaListRows.Add(($item | ConvertTo-Json -Depth 6 -Compress))
                 $rank++
             } else {
                 [Console]::Out.WriteLine(($row | ConvertTo-Json -Depth 4 -Compress))

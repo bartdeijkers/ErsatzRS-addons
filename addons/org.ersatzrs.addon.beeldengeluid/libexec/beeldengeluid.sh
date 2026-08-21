@@ -351,7 +351,7 @@ list_playlist() {
         list_name=$(printf '%s' "$list_name" | json_escape)
         list_description_json=$(printf '%s' "$list_description" | json_escape)
         printf '%s\n' \
-            "{\"record_type\":\"list\",\"provider_id\":\"$provider_id\",\"name\":\"$list_name\",\"description\":\"$list_description_json\"}" \
+            "{\"record_type\":\"list\",\"provider_id\":\"$provider_id\",\"name\":\"$list_name\",\"description\":\"$list_description_json\",\"metadata\":{\"title\":\"$list_name\",\"plot\":\"$list_description_json\",\"guids\":[\"beeldengeluid-list://$provider_id\"]}}" \
             >"$list_work_dir/media-list.ndjson"
     fi
     while IFS= read -r episode_path; do
@@ -491,7 +491,17 @@ list_playlist() {
             [ -z "$episode_image" ] \
                 || printf ',"additional_image_urls":["%s"]' \
                     "$(printf '%s' "$episode_image" | json_escape)" >>"$list_work_dir/media-list.ndjson"
-            printf '}\n' >>"$list_work_dir/media-list.ndjson"
+            printf ',"metadata":{"title":"%s"' "$title" >>"$list_work_dir/media-list.ndjson"
+            [ -z "$series_json" ] || printf ',"show_title":"%s"' "$series_json" >>"$list_work_dir/media-list.ndjson"
+            [ -z "$plot" ] || printf ',"plot":"%s"' "$plot" >>"$list_work_dir/media-list.ndjson"
+            [ -z "$year" ] || printf ',"year":%s' "$year" >>"$list_work_dir/media-list.ndjson"
+            [ -z "$release_date" ] || printf ',"release_date":"%s"' "$release_date" >>"$list_work_dir/media-list.ndjson"
+            [ -z "$content_rating" ] || printf ',"content_ratings":["%s"]' "$(printf '%s' "$content_rating" | json_escape)" >>"$list_work_dir/media-list.ndjson"
+            write_json_array genres "$list_work_dir/genres.txt" >>"$list_work_dir/media-list.ndjson"
+            write_json_array tags "$list_work_dir/subjects.txt" >>"$list_work_dir/media-list.ndjson"
+            [ -z "$collection" ] || printf ',"collection":"%s"' "$collection" >>"$list_work_dir/media-list.ndjson"
+            [ -z "$episode_image" ] || printf ',"artwork":[{"role":"thumb","url":"%s"}]' "$(printf '%s' "$episode_image" | json_escape)" >>"$list_work_dir/media-list.ndjson"
+            printf ',"guids":["beeldengeluid://%s"]}}\n' "$episode_id" >>"$list_work_dir/media-list.ndjson"
             rank=$((rank + 1))
             continue
         fi

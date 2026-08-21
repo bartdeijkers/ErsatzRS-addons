@@ -1,15 +1,15 @@
 manifest_version = 4
 id = "org.ersatzrs.addon.yt-dlp"
-version = "0.5.0"
+version = "0.6.0"
 license = "Zlib"
 source_url = "https://github.com/bartdeijkers/ErsatzRS-addons/tree/main/addons/org.ersatzrs.addon.yt-dlp"
 host_version = ">=0.1.0, <0.2.0"
 
 # Playback works for anything yt-dlp supports, which is why network_hosts is
-# unrestricted. Enumeration is not: it rebuilds each flat-playlist entry as a
-# youtube.com watch URL, so YouTube is the only family this package can claim as
-# its own. Everything else it plays is reached by naming it explicitly or by the
-# administrator's default remote stream processor.
+# unrestricted. Media-list import is not: yt-dlp fully extracts the supplied
+# YouTube playlist and the package maps only that provider family into the
+# shared metadata document. Everything else it plays is reached by naming it
+# explicitly or by the administrator's default remote stream processor.
 default_source_hosts = ["youtube.com", "*.youtube.com", "youtu.be"]
 
 [icon]
@@ -50,6 +50,9 @@ id = "media-list.list.v1"
 
 [[capabilities]]
 id = "media-list.list.v2"
+
+[[capabilities]]
+id = "media-list.list.v4"
 
 [entrypoints."linux-x64"]
 path = "addon.sh"

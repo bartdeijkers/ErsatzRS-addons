@@ -108,6 +108,86 @@ cp "$source_file" "$output"
                 env=environment,
             )
 
+    def run_windows_beeldengeluid_media_list(self) -> subprocess.CompletedProcess[str]:
+        addon = ROOT / "addons" / "org.ersatzrs.addon.beeldengeluid" / "addon.bat"
+        with tempfile.TemporaryDirectory() as temporary:
+            fixtures = pathlib.Path(temporary)
+            (fixtures / "series.html").write_text(
+                '<script type="application/ld+json">'
+                '{"@context":"https://schema.org","@type":"CreativeWorkSeries",'
+                '"name":"Fixture Programme","description":"Fixture introduction",'
+                '"image":"https://schatkamer.beeldengeluid.nl/assets/programme.jpg"}'
+                '</script><a href="/serie/20/fixture/aflevering/201"></a>',
+                encoding="utf-8",
+            )
+            (fixtures / "empty.html").write_text("<html></html>", encoding="utf-8")
+            (fixtures / "episode.html").write_text(
+                '<h1>Fixture Programme</h1><h3>First Episode</h3>'
+                '<script>{"image":"https://schatkamer.beeldengeluid.nl/assets/episode.jpg"};'
+                r'\"program\":{\"id\":\"201\",'
+                r'\"description\":\"Fixture plot\",\"disclaimer\":null,'
+                r'\"durationNumber\":120,\"publishedAtISO\":\"1993-01-24T12:30:00Z\",'
+                r'\"ageRating\":\"Alle leeftijden\",\"genres\":[\"Education\"],'
+                r'\"subjects\":[\"Drawing\"],\"collection\":\"Fixture Collection\",'
+                r'\"presenters\":[{\"name\":\"Presenter One\"}],\"actors\":[],'
+                r'\"guests\":[],\"directors\":[],\"performers\":[],\"others\":[],'
+                r'\"productionCompanies\":[\"Fixture Producer\"],'
+                r'\"genres\":[\"Education\"],'
+                r'\"originalBroadcasters\":[{\"name\":\"Original TV\"}],'
+                r'\"broadcaster\":null,\"broadcasters\":[{\"name\":\"Current TV\"}],'
+                r'\"url\":\"fixture\"</script>',
+                encoding="utf-8",
+            )
+            fake_curl = fixtures / "fake-curl.ps1"
+            fake_curl.write_text(
+                r"""$ErrorActionPreference = 'Stop'
+$output = $null
+$url = $null
+for ($index = 0; $index -lt $args.Count; $index++) {
+    $argument = [string]$args[$index]
+    if ($argument -eq '--output') {
+        $index++
+        $output = [string]$args[$index]
+    } elseif ($argument -match '^https?://') {
+        $url = $argument
+    }
+}
+if (-not $output -or -not $url) { exit 22 }
+if ($url -like '*/aflevering/201') {
+    $source = 'episode.html'
+} elseif ($url -like '*pagina=1*') {
+    $source = 'series.html'
+} elseif ($url -like '*pagina=*') {
+    $source = 'empty.html'
+} else {
+    Write-Error "Unexpected fixture URL: $url"
+    exit 22
+}
+Copy-Item -LiteralPath (Join-Path $env:FAKE_FIXTURES $source) -Destination $output
+exit 0
+""",
+                encoding="utf-8",
+            )
+            environment = os.environ.copy()
+            environment.update(
+                {
+                    "ERSATZRS_ADDON_SETTING_CURL_BIN": str(fake_curl),
+                    "ERSATZRS_MEDIA_LIST_URL": (
+                        "https://schatkamer.beeldengeluid.nl/serie/20/fixture"
+                    ),
+                    "FAKE_FIXTURES": str(fixtures),
+                    "TEMP": str(fixtures),
+                    "TMP": str(fixtures),
+                }
+            )
+            return subprocess.run(
+                [os.environ.get("COMSPEC", "cmd.exe"), "/d", "/c", str(addon), "list"],
+                check=False,
+                capture_output=True,
+                text=True,
+                env=environment,
+            )
+
     def test_beeldengeluid_has_minimal_runtime_configuration(self) -> None:
         addon_root = ROOT / "addons" / "org.ersatzrs.addon.beeldengeluid"
         manifest = tomllib.loads(
@@ -965,6 +1045,39 @@ printf '%s\n' '{"title":"Fixture playlist","description":"Fixture list descripti
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.strip(), 'What does a "portrait" cost?\nNext')
+
+    @unittest.skipUnless(
+        os.name == "nt" and (shutil.which("powershell.exe") or shutil.which("pwsh")),
+        "native Windows PowerShell required",
+    )
+    def test_windows_beeldengeluid_keeps_single_metadata_values_as_arrays(self) -> None:
+        result = self.run_windows_beeldengeluid_media_list()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        rows = [json.loads(line) for line in result.stdout.splitlines()]
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(
+            rows[0]["metadata"]["artwork"],
+            [
+                {
+                    "role": "poster",
+                    "url": "https://schatkamer.beeldengeluid.nl/assets/programme.jpg",
+                }
+            ],
+        )
+        self.assertEqual(rows[1]["metadata"]["content_ratings"], ["nl:AL"])
+        self.assertEqual(
+            rows[1]["metadata"]["artwork"],
+            [
+                {
+                    "role": "thumb",
+                    "url": "https://schatkamer.beeldengeluid.nl/assets/episode.jpg",
+                }
+            ],
+        )
+        self.assertEqual(
+            rows[1]["metadata"]["people"],
+            [{"name": "Presenter One", "role": "presenter"}],
+        )
 
 
 if __name__ == "__main__":

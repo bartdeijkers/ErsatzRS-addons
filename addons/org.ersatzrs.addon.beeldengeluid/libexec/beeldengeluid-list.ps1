@@ -163,6 +163,10 @@ try {
             } else {
                 'Beeld & Geluid Schatkamer'
             }
+            $listArtwork = @()
+            if ($listImage) {
+                $listArtwork = @([ordered]@{ role = 'poster'; url = $listImage })
+            }
             $listRecord = [ordered]@{
                 record_type = 'list'
                 provider_id = $uri.AbsolutePath.Trim('/') + $uri.Query
@@ -171,9 +175,7 @@ try {
                 metadata = [ordered]@{
                     title = $listName
                     plot = $listDescription
-                    artwork = if ($listImage) {
-                        @([ordered]@{ role = 'poster'; url = $listImage })
-                    } else { @() }
+                    artwork = $listArtwork
                     guids = @('beeldengeluid-list://' + $uri.AbsolutePath.Trim('/'))
                 }
             }
@@ -348,6 +350,12 @@ try {
             if ($originalBroadcasters.Count) { $row.original_broadcasters = $originalBroadcasters }
             $broadcasters = @(JsonObjectNames $programHtml 'broadcasters' 'url')
             if ($broadcasters.Count) { $row.broadcasters = $broadcasters }
+            $contentRatings = @()
+            if ($rating) { $contentRatings = @($rating) }
+            $episodeArtwork = @()
+            if ($episodeImage) {
+                $episodeArtwork = @([ordered]@{ role = 'thumb'; url = $episodeImage })
+            }
             $row.is_live = $false
             if ($mediaListMode) {
                 $item = [ordered]@{
@@ -372,7 +380,7 @@ try {
                     show_title = if ($series) { $series } else { $null }
                     year = if ($published) { [int]$published.Substring(0, 4) } else { $null }
                     release_date = $published
-                    content_ratings = if ($rating) { @($rating) } else { @() }
+                    content_ratings = $contentRatings
                     genres = $genres
                     tags = $subjects
                     people = $people
@@ -382,9 +390,7 @@ try {
                     collection = if ($collectionMatch.Success) {
                         [Net.WebUtility]::HtmlDecode($collectionMatch.Groups[1].Value)
                     } else { $null }
-                    artwork = if ($episodeImage) {
-                        @([ordered]@{ role = 'thumb'; url = $episodeImage })
-                    } else { @() }
+                    artwork = $episodeArtwork
                     guids = @('beeldengeluid://' + $episodeId)
                 }
                 $mediaListRows.Add(($item | ConvertTo-Json -Depth 6 -Compress))

@@ -40,6 +40,8 @@ call :require_program "%CURL_BIN%" curl
 if errorlevel 1 exit /b 69
 call :require_program "powershell.exe" PowerShell
 if errorlevel 1 exit /b 69
+call :require_program "deno.exe" Deno
+if errorlevel 1 exit /b 69
 powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass ^
     -File "%~dp0beeldengeluid-list.ps1"
 if errorlevel 1 exit /b 1

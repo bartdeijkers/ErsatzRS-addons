@@ -18,6 +18,8 @@ call :require_program "%CURL_BIN%"
 if errorlevel 1 goto :missing
 call :require_program "powershell.exe"
 if errorlevel 1 goto :missing
+call :require_program "deno.exe"
+if errorlevel 1 goto :missing
 echo {"status":"ready","code":"ready","message":"Beeld ^& Geluid is ready."}
 exit /b 0
 

@@ -4,10 +4,12 @@ This add-on enumerates a Schatkamer series, individual episode, public shared li
 link as NDJSON and streams individual episodes as MPEG-TS. Its Unix and Windows
 Remote Stream implementations perform the complete provider flow directly;
 they do not require Python, yt-dlp, browser cookies, or stored media URLs. The
-same platform scripts emit both the Remote Stream and provider-neutral media-list
-contracts directly. Media-list v4 supplies list and item titles, summaries,
-classification, credits, provenance, and artwork candidates to ErsatzRS's
-shared metadata review editor on Windows and POSIX platforms.
+same platform scripts feed one shared Deno adapter, which normalizes both
+entrypoints to the provider-neutral media-list contract. Media-list v4 supplies
+list and item titles, summaries, classification, credits, provenance, and
+artwork candidates to ErsatzRS's shared metadata review editor on Windows and
+POSIX platforms. The adapter also prefers each programme card's episode still
+over a generic broadcaster image from the episode detail page.
 
 Video is streamed straight through ErsatzRS for immediate playback; no
 permanent file is written.
@@ -20,8 +22,10 @@ contains only the managed playlist manifest and generated stream definitions,
 not downloaded video files.
 
 Required network destinations and executables are declared in `addon.toml`.
-ErsatzRS supplies its managed FFmpeg path. An optional custom curl path can be
-configured on **Settings > Add-ons**.
+ErsatzRS supplies its managed FFmpeg path. Deno must be discoverable on the
+service account's `PATH`; the same Deno installation required by the yt-dlp
+add-on can be shared. An optional custom curl path can be configured on
+**Settings > Add-ons**.
 
 A managed playlist uses the stable add-on identity:
 

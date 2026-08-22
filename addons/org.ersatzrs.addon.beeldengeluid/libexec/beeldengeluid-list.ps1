@@ -34,6 +34,18 @@ function Invoke-CurlToFile([string]$url, [string]$output, [string]$failure) {
     if ($LASTEXITCODE -ne 0) { throw $failure }
 }
 
+function Add-CardImages([string]$htmlPath, [hashtable]$imageByPath) {
+    $adapter = Join-Path $PSScriptRoot 'media-list-adapter.ts'
+    $rows = @(
+        & deno.exe run --quiet "--allow-read=$htmlPath" $adapter --extract-cards $htmlPath
+    )
+    if ($LASTEXITCODE -ne 0) { throw 'episode card metadata was invalid' }
+    foreach ($row in $rows) {
+        $parts = [string]$row -split "`t", 2
+        if ($parts.Count -eq 2) { $imageByPath[$parts[0]] = $parts[1] }
+    }
+}
+
 try {
     $uri = [Uri]$env:PLAYLIST_URL
     $isSeries = $uri.AbsolutePath -match '^/(serie|programma)/\d+/[^/]+/?$'
@@ -63,6 +75,7 @@ try {
         $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
         $paths = [Collections.Generic.List[string]]::new()
         $availabilityByPath = @{}
+        $imageByPath = @{}
 
         if ($isVideo) {
             $paths.Add($uri.AbsolutePath.TrimEnd('/'))
@@ -76,6 +89,7 @@ try {
                 }
                 Invoke-CurlToFile $pageUrl $pageFile 'programme-list page request failed'
                 $html = [IO.File]::ReadAllText($pageFile)
+                Add-CardImages $pageFile $imageByPath
                 if ($page -eq 1 -and $isSeries) {
                     foreach ($script in [regex]::Matches(
                         $html,
@@ -116,6 +130,7 @@ try {
             for ($page = 1; ; $page++) {
                 Invoke-CurlToFile ($base + '?pagina=' + $page) $pageFile 'shared-list page request failed'
                 $html = [IO.File]::ReadAllText($pageFile)
+                Add-CardImages $pageFile $imageByPath
                 if ($page -eq 1) {
                     if (-not [regex]::IsMatch(
                         $html,
@@ -251,7 +266,11 @@ try {
                 $html.Replace('\"', '"'),
                 '"image":"(https://schatkamer[.]beeldengeluid[.]nl/[^"]+)"'
             )
-            $episodeImage = if ($imageMatch.Success) { $imageMatch.Groups[1].Value } else { $listImage }
+            $episodeImage = if ($imageByPath.ContainsKey($path)) {
+                [string]$imageByPath[$path]
+            } elseif ($imageMatch.Success) {
+                $imageMatch.Groups[1].Value
+            } else { $listImage }
             $publishedMatches = [regex]::Matches(
                 $programHtml,
                 '\\\x22publishedAtISO\\\x22:\\\x22([^\\\x22]+)'
@@ -403,9 +422,15 @@ try {
             }
         }
         if ($mediaListMode) {
-            foreach ($record in $mediaListRows) {
-                [Console]::Out.WriteLine($record)
-            }
+            $rawOutput = Join-Path $work 'media-list.raw.ndjson'
+            [IO.File]::WriteAllLines(
+                $rawOutput,
+                [string[]]$mediaListRows,
+                [Text.UTF8Encoding]::new($false)
+            )
+            $adapter = Join-Path $PSScriptRoot 'media-list-adapter.ts'
+            & deno.exe run --quiet "--allow-read=$rawOutput" $adapter --normalize $rawOutput
+            if ($LASTEXITCODE -ne 0) { throw 'metadata adapter rejected provider output' }
         }
     } finally {
         if (Test-Path -LiteralPath $work) {

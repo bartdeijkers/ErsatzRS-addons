@@ -5,6 +5,9 @@
 set -eu
 set -f
 
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+adapter_script="$script_dir/media-list-adapter.ts"
+
 usage() {
     echo "Usage: beeldengeluid.sh list <Schatkamer series or shared-list URL>" >&2
     echo "       beeldengeluid.sh play <Schatkamer episode URL> [seek timestamp]" >&2
@@ -124,6 +127,13 @@ write_json_array() {
     printf ']'
 }
 
+extract_card_images() {
+    page_file=$1
+    deno run --quiet --allow-read="$page_file" "$adapter_script" \
+        --extract-cards "$page_file" >>"$list_work_dir/card-images.tsv" \
+        || fail "episode card metadata was invalid"
+}
+
 discover_series_paths() {
     series_base=$1
     page_number=1
@@ -132,6 +142,7 @@ discover_series_paths() {
         "$curl_bin" --fail --silent --show-error --location --max-redirs 5 --proto '=https' --proto-redir '=https' --retry 2 --connect-timeout 10 --max-time 45 \
             --output "$list_work_dir/page.html" "$page_url" \
             || fail "the Schatkamer series page request failed"
+        extract_card_images "$list_work_dir/page.html"
         if [ "$page_number" -eq 1 ]; then
             sed '' "$list_work_dir/page.html" >"$list_work_dir/source-page.html"
         fi
@@ -167,6 +178,7 @@ discover_search_paths() {
         "$curl_bin" --fail --silent --show-error --location --max-redirs 5 --proto '=https' --proto-redir '=https' --retry 2 --connect-timeout 10 --max-time 45 \
             --output "$list_work_dir/page.html" "$page_url" \
             || fail "the Schatkamer search page request failed"
+        extract_card_images "$list_work_dir/page.html"
         grep -o 'href="/serie/[0-9][0-9]*/[^"/]*/aflevering/[0-9][0-9]*"' \
             "$list_work_dir/page.html" \
             | sed -e 's/^href="//' -e 's/"$//' \
@@ -198,6 +210,7 @@ discover_shared_list_paths() {
         "$curl_bin" --fail --silent --show-error --location --max-redirs 5 --proto '=https' --proto-redir '=https' --retry 2 --connect-timeout 10 --max-time 45 \
             --output "$list_work_dir/page.html" "$page_url" \
             || fail "the Schatkamer shared-list page request failed"
+        extract_card_images "$list_work_dir/page.html"
         sed 's/\\"/"/g' "$list_work_dir/page.html" \
             >"$list_work_dir/normalized-list.html"
         if [ "$page_number" -eq 1 ]; then
@@ -316,6 +329,7 @@ list_playlist() {
     find_program sed "sed"
     find_program awk "awk"
     find_program mktemp "mktemp"
+    find_program deno "Deno"
 
     list_work_dir=$(mktemp -d "${TMPDIR:-/tmp}/ersatzrs-beeldengeluid-list.XXXXXX") \
         || fail "unable to create a temporary directory"
@@ -326,6 +340,7 @@ list_playlist() {
     trap list_cleanup EXIT HUP INT TERM
     : >"$list_work_dir/seen.txt"
     : >"$list_work_dir/seen-all.txt"
+    : >"$list_work_dir/card-images.tsv"
     shared_list_name=
     list_description='Programmes selected by the supplied Schatkamer link.'
     list_image=
@@ -396,9 +411,12 @@ list_playlist() {
             title=$episode_title
         fi
         title=$(printf '%s' "$title" | html_decode | json_escape)
-        episode_image=$(sed 's/\\"/"/g' "$list_work_dir/episode.html" \
+        detail_image=$(sed 's/\\"/"/g' "$list_work_dir/episode.html" \
             | grep -o '"image":"https://schatkamer.beeldengeluid.nl/[^"]*"' \
             | sed -n '1{s/^"image":"//;s/"$//;p;}')
+        episode_image=$(awk -F '\t' -v path="$episode_path" \
+            '$1 == path { print $2; exit }' "$list_work_dir/card-images.tsv")
+        [ -n "$episode_image" ] || episode_image=$detail_image
         [ -n "$episode_image" ] || episode_image=$list_image
         plot=$(json_scalar_value description disclaimer \
             "$list_work_dir/episode.html" | json_escape)
@@ -542,9 +560,9 @@ list_playlist() {
         printf ',"is_live":false}\n'
     done <"$list_work_dir/seen.txt"
     if [ "$output_mode" = media-list ]; then
-        while IFS= read -r record; do
-            printf '%s\n' "$record"
-        done <"$list_work_dir/media-list.ndjson"
+        deno run --quiet --allow-read="$list_work_dir/media-list.ndjson" \
+            "$adapter_script" --normalize "$list_work_dir/media-list.ndjson" \
+            || fail "the metadata adapter rejected provider output"
     fi
     exit 0
 }

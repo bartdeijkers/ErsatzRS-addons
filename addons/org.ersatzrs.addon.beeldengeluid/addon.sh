@@ -30,7 +30,7 @@ run_provider() {
 }
 
 check() {
-    for program in "$FFMPEG_BIN" "$curl_bin" awk grep dd sed mktemp; do
+    for program in "$FFMPEG_BIN" "$curl_bin" awk grep dd sed mktemp deno; do
         if ! have_program "$program"; then
             printf '%s\n' '{"status":"unavailable","code":"missing-command","message":"A required executable is unavailable."}'
             exit 0

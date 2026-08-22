@@ -9,7 +9,8 @@ The repository contains:
 
 - `org.ersatzrs.addon.beeldengeluid`: enumerates Schatkamer series, individual
   episodes, public user-made lists, and saved searches, and streams their programmes. Its Remote
-  Stream and media-list paths do not require Python or yt-dlp.
+  Stream and media-list paths do not require Python or yt-dlp; a shared Deno
+  adapter normalizes provider data for both Windows and POSIX entrypoints.
 - `org.ersatzrs.addon.yt-dlp`: streams a remote video through an
   operator-installed yt-dlp and the ErsatzRS-managed FFmpeg runtime. It also
   requires an operator-installed deno, the JavaScript runtime yt-dlp enables by

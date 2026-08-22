@@ -9,3 +9,7 @@ private repository.
 The binary handles public manifest and catalog data only. Replace it only from
 a reviewed host contract version, update `SHA256SUMS`, and rerun the complete
 repository test and deterministic-build gates before publishing.
+
+The current binary was built from ErsatzRS commit
+`8a008c3bb95830bfeb48e636640a246984e97033`; it adds exact runtime conformance
+validation for captured media-list NDJSON through `--kind media-list-output`.

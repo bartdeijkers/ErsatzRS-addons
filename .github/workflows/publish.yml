@@ -24,6 +24,9 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.13'
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
       - name: Test native Windows entrypoints
         run: python -m unittest discover -s tests
 
@@ -49,6 +52,14 @@ jobs:
           sha256sum --check SHA256SUMS
           cd ../..
           tools/validator/ersatzrs-addon-validator-x86_64-unknown-linux-gnu addons/*/addon.toml
+          deno run --quiet \
+            --allow-read=tests/fixtures/beeldengeluid-media-list-raw.ndjson \
+            addons/org.ersatzrs.addon.beeldengeluid/libexec/media-list-adapter.ts \
+            --normalize tests/fixtures/beeldengeluid-media-list-raw.ndjson \
+            > "$RUNNER_TEMP/beeldengeluid-media-list.ndjson"
+          tools/validator/ersatzrs-addon-validator-x86_64-unknown-linux-gnu \
+            --kind media-list-output \
+            "$RUNNER_TEMP/beeldengeluid-media-list.ndjson"
       - name: Test repository tooling and entrypoints
         run: |
           cargo test --locked

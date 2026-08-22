@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -89,8 +90,15 @@ cp "$source_file" "$output"
                 encoding="utf-8",
             )
             fake_curl.chmod(0o755)
+            deno = shutil.which("deno") or shutil.which("deno.exe")
+            runtime = fixtures / "deno"
+            runtime.write_text(
+                "#!/bin/sh\nexec " + shlex.quote(deno or "deno") + ' "$@"\n',
+                encoding="utf-8",
+            )
+            runtime.chmod(0o755)
             environment = {
-                "PATH": "/usr/bin:/bin",
+                "PATH": f"{fixtures}:/usr/bin:/bin",
                 "FFMPEG_BIN": "/bin/true",
                 "ERSATZRS_ADDON_SETTING_CURL_BIN": str(fake_curl),
                 "FAKE_FIXTURES": str(fixtures),
@@ -117,7 +125,10 @@ cp "$source_file" "$output"
                 '{"@context":"https://schema.org","@type":"CreativeWorkSeries",'
                 '"name":"Fixture Programme","description":"Fixture introduction",'
                 '"image":"https://schatkamer.beeldengeluid.nl/assets/programme.jpg"}'
-                '</script><a href="/serie/20/fixture/aflevering/201"></a>',
+                '</script><a href="/serie/20/fixture/aflevering/201">'
+                '<img src="https://schatkamer.beeldengeluid.nl/image-optimizer?'
+                'url=aHR0cHM6Ly9zay12aWRlby5jZG4uYmVlbGRlbmdlbHVpZC5ubC9maXh0dXJlL3N0aWxsLmpwZw'
+                '&amp;width=640&amp;quality=80&amp;format=webp"></a>',
                 encoding="utf-8",
             )
             (fixtures / "empty.html").write_text("<html></html>", encoding="utf-8")
@@ -208,6 +219,7 @@ exit 0
         self.assertFalse(
             {"python", "python3"} & set(manifest["permissions"]["external_commands"])
         )
+        self.assertIn("deno", manifest["permissions"]["external_commands"])
         for relative_path in [
             "addon.sh",
             "addon.bat",
@@ -624,7 +636,10 @@ exit 0
             '{"@context":"https://schema.org","@type":"CreativeWorkSeries",'
             '"name":"Fixture Programme","description":"Full editorial introduction",'
             '"image":"https://schatkamer.beeldengeluid.nl/assets/programme.jpg"}'
-            '</script><a href="/serie/20/fixture/aflevering/201"></a>'
+            '</script><a href="/serie/20/fixture/aflevering/201">'
+            '<img src="https://schatkamer.beeldengeluid.nl/image-optimizer?'
+            'url=aHR0cHM6Ly9zay12aWRlby5jZG4uYmVlbGRlbmdlbHVpZC5ubC9maXh0dXJlL3N0aWxsLmpwZw'
+            '&amp;width=640&amp;quality=80&amp;format=webp"></a>'
         )
         episode_page = (
             '<h1>Fixture Programme</h1><h3>First Episode</h3>'
@@ -647,8 +662,51 @@ exit 0
         self.assertEqual(rows[1]["metadata"]["release_date"], "1993-01-24")
         self.assertEqual(
             rows[1]["additional_image_urls"],
-            ["https://schatkamer.beeldengeluid.nl/assets/episode.jpg"],
+            ["https://sk-video.cdn.beeldengeluid.nl/fixture/still.jpg"],
         )
+
+    @unittest.skipUnless(
+        shutil.which("deno") or shutil.which("deno.exe"), "deno required"
+    )
+    def test_beeldengeluid_adapter_normalizes_the_v4_contract_boundary(self) -> None:
+        adapter = (
+            ROOT
+            / "addons"
+            / "org.ersatzrs.addon.beeldengeluid"
+            / "libexec"
+            / "media-list-adapter.ts"
+        )
+        source = ROOT / "tests" / "fixtures" / "beeldengeluid-media-list-raw.ndjson"
+        result = subprocess.run(
+            [
+                shutil.which("deno") or shutil.which("deno.exe") or "deno",
+                "run",
+                "--quiet",
+                f"--allow-read={source}",
+                str(adapter),
+                "--normalize",
+                str(source),
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        rows = [json.loads(line) for line in result.stdout.splitlines()]
+        self.assertIsInstance(rows[0]["metadata"]["artwork"], list)
+        metadata = rows[1]["metadata"]
+        self.assertEqual(metadata["release_date"], "1993-01-24")
+        self.assertEqual(metadata["content_ratings"], ["nl:AL"])
+        self.assertEqual(metadata["tags"], ["drawing"])
+        self.assertEqual(
+            metadata["people"], [{"name": "Presenter One", "role": "presenter"}]
+        )
+        self.assertIsInstance(metadata["artwork"], list)
+        self.assertEqual(
+            rows[1]["additional_image_urls"],
+            ["https://images.example.test/still.jpg"],
+        )
+        self.assertNotIn("provider_private_field", metadata)
 
     @unittest.skipUnless(pathlib.Path("/bin/sh").exists(), "POSIX shell required")
     def test_posix_beeldengeluid_accepts_one_episode_as_a_list(self) -> None:
@@ -1073,7 +1131,7 @@ printf '%s\n' '{"title":"Fixture playlist","description":"Fixture list descripti
             [
                 {
                     "role": "thumb",
-                    "url": "https://schatkamer.beeldengeluid.nl/assets/episode.jpg",
+                    "url": "https://sk-video.cdn.beeldengeluid.nl/fixture/still.jpg",
                 }
             ],
         )

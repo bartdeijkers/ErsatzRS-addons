@@ -407,7 +407,7 @@ list_playlist() {
             | sed -n '1{s/^.*://;p;}')
         release_date=$(grep -o '\\"publishedAtISO\\":\\"[0-9][0-9][0-9][0-9]-[^\"]*' \
             "$list_work_dir/episode.html" \
-            | sed -n '$ { s/^.*\\"//; p; }')
+            | sed -n '$ s/^.*\\"\([0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]\).*$/\1/p')
         year=$(printf '%s' "$release_date" | sed -n 's/^\([0-9][0-9][0-9][0-9]\)-.*/\1/p')
         age_rating=$(grep -o '\\"ageRating\\":\\"[^\"]*' \
             "$list_work_dir/episode.html" \

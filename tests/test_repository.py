@@ -575,6 +575,7 @@ exit 0
         self.assertEqual([row["id"] for row in rows], ["101", "102", "103"])
         self.assertEqual(rows[0]["plot"], "Fixture plot")
         self.assertEqual(rows[0]["duration_seconds"], 120)
+        self.assertEqual(rows[0]["release_date"], "1993-01-24")
         self.assertEqual(rows[0]["genres"], ["Education"])
         self.assertEqual(rows[0]["tags"], ["Drawing"])
         self.assertEqual(rows[0]["collection"], "Fixture Collection")
@@ -629,7 +630,7 @@ exit 0
             '<h1>Fixture Programme</h1><h3>First Episode</h3>'
             '<script>{"image":"https://schatkamer.beeldengeluid.nl/assets/episode.jpg"};'
             r'\"description\":\"Fixture plot\",\"disclaimer\":null,'
-            r'\"durationNumber\":120</script>'
+            r'\"durationNumber\":120,\"publishedAtISO\":\"1993-01-24T12:30:00Z\"</script>'
         )
         result = self.run_posix_beeldengeluid_list(
             "https://schatkamer.beeldengeluid.nl/serie/20/fixture",
@@ -643,6 +644,7 @@ exit 0
         self.assertEqual(rows[0]["name"], "Fixture Programme")
         self.assertEqual(rows[0]["description"], "Full editorial introduction")
         self.assertEqual(rows[1]["duration_seconds"], 120)
+        self.assertEqual(rows[1]["metadata"]["release_date"], "1993-01-24")
         self.assertEqual(
             rows[1]["additional_image_urls"],
             ["https://schatkamer.beeldengeluid.nl/assets/episode.jpg"],
@@ -1065,6 +1067,7 @@ printf '%s\n' '{"title":"Fixture playlist","description":"Fixture list descripti
             ],
         )
         self.assertEqual(rows[1]["metadata"]["content_ratings"], ["nl:AL"])
+        self.assertEqual(rows[1]["metadata"]["release_date"], "1993-01-24")
         self.assertEqual(
             rows[1]["metadata"]["artwork"],
             [

@@ -259,6 +259,9 @@ try {
             $published = if ($publishedMatches.Count) {
                 $publishedMatches[$publishedMatches.Count - 1].Groups[1].Value
             } else { $null }
+            $releaseDate = if ($published -match '^([0-9]{4}-[0-9]{2}-[0-9]{2})(?:T.*)?$') {
+                $Matches[1]
+            } else { $null }
             $descriptionRaw = JsonSlice $programHtml 'description' 'disclaimer'
             $plot = $null
             if ($descriptionRaw) {
@@ -317,9 +320,9 @@ try {
                 $row.additional_image_urls = @($episodeImage)
             }
             if ($plot) { $row.plot = $plot }
-            if ($published) {
-                $row.release_date = $published
-                $row.year = [int]$published.Substring(0, 4)
+            if ($releaseDate) {
+                $row.release_date = $releaseDate
+                $row.year = [int]$releaseDate.Substring(0, 4)
             }
             if ($rating) { $row.content_rating = $rating }
             $row.genres = $genres
@@ -371,15 +374,15 @@ try {
                     content_kind = $contentKind
                 }
                 if ($availability -eq 'unavailable') { $item.availability_reason = 'not_playable' }
-                if ($published) { $item.year = [int]$published.Substring(0, 4) }
+                if ($releaseDate) { $item.year = [int]$releaseDate.Substring(0, 4) }
                 if ($duration.Success) { $item.duration_seconds = [int64]$duration.Groups[1].Value }
                 if ($episodeImage) { $item.additional_image_urls = @($episodeImage) }
                 $item.metadata = [ordered]@{
                     title = $title
                     plot = $plot
                     show_title = if ($series) { $series } else { $null }
-                    year = if ($published) { [int]$published.Substring(0, 4) } else { $null }
-                    release_date = $published
+                    year = if ($releaseDate) { [int]$releaseDate.Substring(0, 4) } else { $null }
+                    release_date = $releaseDate
                     content_ratings = $contentRatings
                     genres = $genres
                     tags = $subjects

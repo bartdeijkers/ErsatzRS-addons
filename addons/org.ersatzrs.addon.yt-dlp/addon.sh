@@ -6,6 +6,11 @@ set -f
 operation=${1:-}
 yt_dlp=${ERSATZRS_ADDON_SETTING_YT_DLP_BIN:-yt-dlp}
 js_runtime=deno
+case $0 in
+    */*) script_dir=${0%/*} ;;
+    *) script_dir=. ;;
+esac
+script_dir=$(CDPATH= cd -- "$script_dir" && pwd)
 
 have_program() {
     [ -x "$1" ] || command -v "$1" >/dev/null 2>&1
@@ -39,6 +44,13 @@ enumerate_playlist() {
         --replace-in-metadata ersatzrs_content_kind '(?i).*(movie|film|speelfilm).*' movie \
         --replace-in-metadata ersatzrs_content_kind '(?i).*ERSATZRS_TV.*' television_episode \
         --replace-in-metadata ersatzrs_content_kind '^(?!(other_video|music_video|movie|television_episode)$).*$' auto \
+        --parse-metadata '%(live_status|unknown)s:%(ersatzrs_liveness)s' \
+        --replace-in-metadata ersatzrs_liveness '^(is_live|is_upcoming)$' live \
+        --replace-in-metadata ersatzrs_liveness '^(not_live|post_live|was_live)$' finite \
+        --replace-in-metadata ersatzrs_liveness '^(?!(live|finite)$).*$' unknown \
+        --parse-metadata '%(live_status|unknown)s:%(ersatzrs_live_flag)s' \
+        --replace-in-metadata ersatzrs_live_flag '^(is_live|is_upcoming)$' true \
+        --replace-in-metadata ersatzrs_live_flag '^(?!(true)$).*$' false \
         --print "$output_template" \
         "$playlist_url"
     then
@@ -60,7 +72,20 @@ enumerate_media_list() {
         --dump-single-json \
         "$playlist_url" \
         | deno run --quiet --allow-env=ERSATZRS_MEDIA_LIST_URL,PLAYLIST_URL \
-            "$(dirname "$0")/libexec/media-list.ts"
+            "$script_dir/libexec/media-list.ts"
+    then
+        return 0
+    else
+        status=$?
+        fail provider-unreachable "The video provider request failed." "$status"
+    fi
+}
+
+run_media_list_import() {
+    YT_DLP_BIN=$yt_dlp
+    export YT_DLP_BIN
+    if deno run --quiet --allow-env=YT_DLP_BIN --allow-run \
+        "$script_dir/libexec/media-list-import.ts" "$operation"
     then
         return 0
     else
@@ -83,6 +108,9 @@ case "$operation" in
             printf '%s\n' '{"status":"ready","code":"ready","message":"yt-dlp Remote Streams is ready."}'
         fi
         ;;
+    discover | enrich)
+        run_media_list_import
+        ;;
     list)
         playlist_url=${ERSATZRS_MEDIA_LIST_URL:-${ERSATZRS_REMOTE_STREAM_PLAYLIST_URL:-}}
         [ -n "$playlist_url" ] || fail missing-setting "A playlist URL is required." 64
@@ -98,7 +126,7 @@ case "$operation" in
             exit 0
         fi
         enumerate_playlist \
-            '{"id":%(id)j,"provider_id":%(id)j,"url":%(webpage_url,original_url,url)j,"title":%(title)j,"plot":%(description)j,"duration_seconds":%(duration)j,"year":%(release_year)j,"genres":%(categories)j,"tags":%(tags)j,"thumbnail_url":%(thumbnail)j,"availability":%(ersatzrs_availability)j,"availability_reason":%(ersatzrs_unavailable&"not_playable"|null)s,"content_kind":%(ersatzrs_content_kind)j,"guids":["yt-dlp://%(id)s"],"is_live":false}' \
+            '{"id":%(id)j,"provider_id":%(id)j,"url":%(webpage_url,original_url,url)j,"title":%(title)j,"plot":%(description)j,"duration_seconds":%(duration)j,"year":%(release_year)j,"genres":%(categories)j,"tags":%(tags)j,"thumbnail_url":%(thumbnail)j,"availability":%(ersatzrs_availability)j,"availability_reason":%(ersatzrs_unavailable&"not_playable"|null)s,"content_kind":%(ersatzrs_content_kind)j,"guids":["yt-dlp://%(id)s"],"liveness":%(ersatzrs_liveness)j,"is_live":%(ersatzrs_live_flag)s}' \
             "$playlist_url"
         ;;
     item)

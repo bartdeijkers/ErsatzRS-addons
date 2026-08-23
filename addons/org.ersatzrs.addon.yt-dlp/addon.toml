@@ -1,6 +1,6 @@
 manifest_version = 4
 id = "org.ersatzrs.addon.yt-dlp"
-version = "0.6.0"
+version = "0.7.0"
 license = "Zlib"
 source_url = "https://github.com/bartdeijkers/ErsatzRS-addons/tree/main/addons/org.ersatzrs.addon.yt-dlp"
 host_version = ">=0.1.0, <0.2.0"
@@ -43,6 +43,12 @@ id = "remote-stream.list.v1"
 id = "remote-stream.list.v2"
 
 [[capabilities]]
+id = "remote-stream.list.v3"
+
+[[capabilities]]
+id = "remote-stream.list.v4"
+
+[[capabilities]]
 id = "remote-stream.item.v2"
 
 [[capabilities]]
@@ -53,6 +59,12 @@ id = "media-list.list.v2"
 
 [[capabilities]]
 id = "media-list.list.v4"
+
+[[capabilities]]
+id = "media-list.list.v5"
+
+[[capabilities]]
+id = "media-list.import.v1"
 
 [entrypoints."linux-x64"]
 path = "addon.sh"

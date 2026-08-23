@@ -4,7 +4,11 @@ set -eu
 set -f
 
 operation=${1:-}
-script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+case $0 in
+    */*) script_dir=${0%/*} ;;
+    *) script_dir=. ;;
+esac
+script_dir=$(CDPATH= cd -- "$script_dir" && pwd)
 curl_bin=${ERSATZRS_ADDON_SETTING_CURL_BIN:-curl}
 export CURL_BIN=$curl_bin
 
@@ -29,6 +33,18 @@ run_provider() {
     fi
 }
 
+run_media_list_import() {
+    export CURL_BIN=$curl_bin
+    if deno run --quiet --allow-env=CURL_BIN --allow-run \
+        "$script_dir/libexec/media-list-import.ts" "$operation"
+    then
+        return 0
+    else
+        status=$?
+        fail provider-unreachable "The media provider request failed." "$status"
+    fi
+}
+
 check() {
     for program in "$FFMPEG_BIN" "$curl_bin" awk grep dd sed mktemp deno; do
         if ! have_program "$program"; then
@@ -42,6 +58,9 @@ check() {
 case "$operation" in
     check)
         check
+        ;;
+    discover | enrich)
+        run_media_list_import
         ;;
     list)
         if [ -n "${ERSATZRS_MEDIA_LIST_URL:-}" ]; then

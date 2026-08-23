@@ -5,6 +5,8 @@ set "OPERATION=%~1"
 if defined ERSATZRS_ADDON_SETTING_CURL_BIN set "CURL_BIN=%ERSATZRS_ADDON_SETTING_CURL_BIN%"
 
 if /i "%OPERATION%"=="check" goto :check
+if /i "%OPERATION%"=="discover" goto :media_list_import
+if /i "%OPERATION%"=="enrich" goto :media_list_import
 if /i "%OPERATION%"=="list" goto :list
 if /i "%OPERATION%"=="play" goto :play
 call :fail operation-failed "Unsupported add-on operation." 64
@@ -25,6 +27,16 @@ exit /b 0
 
 :missing
 echo {"status":"unavailable","code":"missing-command","message":"A required executable is unavailable."}
+exit /b 0
+
+:media_list_import
+if not defined CURL_BIN set "CURL_BIN=curl.exe"
+call :require_program "%CURL_BIN%"
+if errorlevel 1 goto :missing
+call :require_program "deno.exe"
+if errorlevel 1 goto :missing
+deno.exe run --quiet --allow-env=CURL_BIN --allow-run "%~dp0libexec\media-list-import.ts" "%OPERATION%"
+if errorlevel 1 goto :provider_failed
 exit /b 0
 
 :list

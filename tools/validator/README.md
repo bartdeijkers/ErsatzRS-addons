@@ -10,6 +10,8 @@ The binary handles public manifest and catalog data only. Replace it only from
 a reviewed host contract version, update `SHA256SUMS`, and rerun the complete
 repository test and deterministic-build gates before publishing.
 
-The current binary was built from ErsatzRS commit
-`8a008c3bb95830bfeb48e636640a246984e97033`; it adds exact runtime conformance
-validation for captured media-list NDJSON through `--kind media-list-output`.
+The current binary was built from `ersatzrs-addon-contract` 0.2.0 after the
+AMM-F/AMM-G contract update. It validates `media-list.list.v5` liveness and the
+overview/detail records used by `media-list.import.v1`, in addition to exact
+runtime conformance for captured media-list NDJSON through
+`--kind media-list-output`.

@@ -24,6 +24,18 @@ function AvailabilityReason([object]$entry) {
     return $null
 }
 
+function Liveness([object]$entry) {
+    if ($entry.is_live -eq $true -or [string]$entry.live_status -in @('is_live', 'is_upcoming')) {
+        return 'live'
+    }
+    if ($entry.is_live -eq $false -or [string]$entry.live_status -in @(
+        'not_live', 'post_live', 'was_live'
+    ) -or [double]$entry.duration -gt 0) {
+        return 'finite'
+    }
+    return 'unknown'
+}
+
 try {
     $uri = [Uri]$env:PLAYLIST_URL
     if ($uri.Scheme -notin @('http', 'https')) { throw 'playlist URL must use HTTP or HTTPS' }
@@ -43,6 +55,7 @@ try {
         $url = if ($entry.webpage_url) { [string]$entry.webpage_url } elseif ($entry.url) { [string]$entry.url } else { continue }
         $genres = @($entry.categories | Where-Object { $null -ne $_ })
         $tags = @($entry.tags | Where-Object { $null -ne $_ })
+        $liveness = Liveness $entry
         $row = [ordered]@{
             id = [string]$entry.id
             provider_id = [string]$entry.id
@@ -55,7 +68,8 @@ try {
             availability = Availability $entry
             content_kind = ContentKind $entry
             guids = @('yt-dlp://' + [string]$entry.id)
-            is_live = $false
+            liveness = $liveness
+            is_live = $liveness -eq 'live'
         }
         $reason = AvailabilityReason $entry
         if ($reason) { $row.availability_reason = $reason }

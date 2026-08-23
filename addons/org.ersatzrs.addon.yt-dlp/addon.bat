@@ -6,6 +6,8 @@ set "YT_DLP_BIN=%ERSATZRS_ADDON_SETTING_YT_DLP_BIN%"
 if not defined YT_DLP_BIN set "YT_DLP_BIN=yt-dlp.exe"
 
 if /i "%OPERATION%"=="check" goto :check
+if /i "%OPERATION%"=="discover" goto :media_list_import
+if /i "%OPERATION%"=="enrich" goto :media_list_import
 if /i "%OPERATION%"=="list" goto :list
 if /i "%OPERATION%"=="item" goto :item
 if /i "%OPERATION%"=="play" goto :play
@@ -22,6 +24,15 @@ if errorlevel 1 goto :missing
 call :require_program "deno.exe"
 if errorlevel 1 goto :missing_js_runtime
 echo {"status":"ready","code":"ready","message":"yt-dlp Remote Streams is ready."}
+exit /b 0
+
+:media_list_import
+call :require_program "%YT_DLP_BIN%"
+if errorlevel 1 goto :missing
+call :require_program "deno.exe"
+if errorlevel 1 goto :missing_js_runtime
+deno.exe run --quiet --allow-env=YT_DLP_BIN --allow-run "%~dp0libexec\media-list-import.ts" "%OPERATION%"
+if errorlevel 1 goto :provider_failed
 exit /b 0
 
 :item

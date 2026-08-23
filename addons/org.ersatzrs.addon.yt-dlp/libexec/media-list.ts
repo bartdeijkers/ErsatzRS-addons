@@ -33,6 +33,8 @@ interface ProviderEntry {
   thumbnail_height?: number;
   thumbnails?: Thumbnail[];
   playlist_index?: number;
+  is_live?: boolean;
+  live_status?: string;
 }
 
 interface ProviderPlaylist extends ProviderEntry {
@@ -151,6 +153,21 @@ function availability(value: unknown): "available" | "unavailable" | "unknown" {
   return "unknown";
 }
 
+function liveness(entry: ProviderEntry): "unknown" | "finite" | "live" {
+  if (
+    entry.is_live === true ||
+    ["is_live", "is_upcoming"].includes(entry.live_status ?? "")
+  ) {
+    return "live";
+  }
+  if (
+    entry.is_live === false ||
+    ["not_live", "post_live", "was_live"].includes(entry.live_status ?? "") ||
+    (entry.duration ?? 0) > 0
+  ) return "finite";
+  return "unknown";
+}
+
 function contentKind(entry: ProviderEntry): string {
   const identity = [
     entry.series && "ERSATZRS_TV",
@@ -245,6 +262,7 @@ for (const entry of playlist.entries ?? []) {
     guids: [`yt-dlp://${id}`],
     source_url: stableUrl,
     availability: state,
+    liveness: liveness(entry),
     content_kind: contentKind(entry),
     duration_seconds:
       Number.isFinite(entry.duration) && (entry.duration ?? -1) >= 0

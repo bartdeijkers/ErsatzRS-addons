@@ -1140,6 +1140,281 @@ printf '%s\n' '{"title":"Fixture playlist","description":"Fixture list descripti
             [{"name": "Presenter One", "role": "presenter"}],
         )
 
+    @unittest.skipUnless(
+        shutil.which("deno") or shutil.which("deno.exe"), "deno required"
+    )
+    def test_resumable_beeldengeluid_import_separates_overview_and_detail_requests(self) -> None:
+        addon_root = ROOT / "addons" / "org.ersatzrs.addon.beeldengeluid"
+        with tempfile.TemporaryDirectory() as temporary:
+            fixtures = pathlib.Path(temporary)
+            overview = fixtures / "overview.html"
+            overview.write_text(
+                '<script type="application/ld+json">'
+                '{"@type":"CreativeWorkSeries","name":"Fixture Programme",'
+                '"description":"Programme description",'
+                '"image":"https://schatkamer.beeldengeluid.nl/assets/programme.jpg"}'
+                '</script><li><a data-gtm-interaction-text="Home" href="/">Home</a></li>'
+                '<li><a data-gtm-interaction-text="First episode" '
+                'href="/serie/20/fixture/aflevering/201">'
+                '<img src="https://schatkamer.beeldengeluid.nl/assets/episode.jpg">'
+                '<div role="img" aria-label="Video"></div>'
+                '<span class="highlight-title">First episode</span>'
+                '<span>24 januari 1993</span></a>'
+                '<p>Overview plot</p></li>\n',
+                encoding="utf-8",
+            )
+            detail = fixtures / "detail.html"
+            detail.write_text(
+                '<h1>Fixture Programme</h1><h3>First episode</h3>'
+                '<script>{"image":"https://schatkamer.beeldengeluid.nl/assets/episode.jpg",'
+                '"description":"Detailed plot","durationNumber":120,'
+                '"publishedAtISO":"1993-01-24T12:30:00Z",'
+                '"genres":["Education"],"subjects":["Drawing"]}</script>\n',
+                encoding="utf-8",
+            )
+            calls = fixtures / "calls.txt"
+            if os.name == "nt":
+                fake = fixtures / "fake-curl.cmd"
+                fake.write_text(
+                    '@echo off\n>>"%FAKE_CALLS%" echo %*\ntype "%FAKE_FIXTURE%"\n'
+                    'echo __ERSATZRS_HTTP_STATUS__:200\n',
+                    encoding="utf-8",
+                )
+                command = [
+                    os.environ.get("COMSPEC", "cmd.exe"),
+                    "/d",
+                    "/c",
+                    str(addon_root / "addon.bat"),
+                ]
+            else:
+                fake = fixtures / "fake-curl"
+                fake.write_text(
+                    '#!/bin/sh\nprintf \'%s\\n\' "$*" >> "$FAKE_CALLS"\n'
+                    'cat "$FAKE_FIXTURE"\nprintf \'\\n__ERSATZRS_HTTP_STATUS__:200\'\n',
+                    encoding="utf-8",
+                )
+                fake.chmod(0o755)
+                command = ["/bin/sh", str(addon_root / "addon.sh")]
+            environment = os.environ.copy()
+            environment.update(
+                {
+                    "CURL_BIN": str(fake),
+                    "ERSATZRS_ADDON_SETTING_CURL_BIN": str(fake),
+                    "FAKE_CALLS": str(calls),
+                    "FAKE_FIXTURE": str(overview),
+                }
+            )
+            discover_request = {
+                "source_url": "https://schatkamer.beeldengeluid.nl/serie/20/fixture",
+                "record_capability": "media-list.list.v5",
+                "limits": {"max_items": 250, "max_output_bytes": 4_194_304},
+            }
+            discovered = subprocess.run(
+                [*command, "discover"],
+                input=json.dumps(discover_request),
+                check=False,
+                capture_output=True,
+                text=True,
+                env=environment,
+            )
+            self.assertEqual(discovered.returncode, 0, discovered.stderr)
+            rows = [json.loads(line) for line in discovered.stdout.splitlines()]
+            self.assertEqual(rows[0]["record_type"], "page")
+            self.assertEqual(rows[1]["name"], "Fixture Programme")
+            self.assertEqual(rows[2]["title"], "First episode")
+            self.assertEqual(rows[2]["metadata"]["plot"], "Overview plot")
+            self.assertEqual(rows[2]["metadata"]["release_date"], "1993-01-24")
+            self.assertEqual(
+                rows[2]["thumbnail_url"],
+                "https://schatkamer.beeldengeluid.nl/assets/episode.jpg",
+            )
+            self.assertEqual(rows[2]["liveness"], "finite")
+            overview_calls = calls.read_text(encoding="utf-8").splitlines()
+            self.assertEqual(len(overview_calls), 1)
+            self.assertIn("pagina=1", overview_calls[0])
+            self.assertNotIn("aflevering/201", overview_calls[0])
+
+            environment["FAKE_FIXTURE"] = str(detail)
+            enrich_request = {
+                "source_url": discover_request["source_url"],
+                "record_capability": "media-list.list.v5",
+                "provider_id": "episode:201",
+                "overview_fingerprint": "fixture-fingerprint",
+                "item": rows[2],
+            }
+            enriched = subprocess.run(
+                [*command, "enrich"],
+                input=json.dumps(enrich_request),
+                check=False,
+                capture_output=True,
+                text=True,
+                env=environment,
+            )
+            self.assertEqual(enriched.returncode, 0, enriched.stderr)
+            detail_rows = [json.loads(line) for line in enriched.stdout.splitlines()]
+            self.assertEqual(detail_rows[0]["outcome"], "complete")
+            self.assertEqual(detail_rows[1]["metadata"]["plot"], "Detailed plot")
+            self.assertEqual(detail_rows[1]["duration_seconds"], 120)
+            all_calls = calls.read_text(encoding="utf-8").splitlines()
+            self.assertEqual(len(all_calls), 2)
+            self.assertIn("aflevering/201", all_calls[1])
+
+        manifest = tomllib.loads((addon_root / "addon.toml").read_text(encoding="utf-8"))
+        capabilities = {item["id"] for item in manifest["capabilities"]}
+        self.assertIn("media-list.import.v1", capabilities)
+        self.assertIn("media-list.list.v5", capabilities)
+        for entrypoint in ["addon.sh", "addon.bat"]:
+            source = (addon_root / entrypoint).read_text(encoding="utf-8")
+            self.assertIn("media-list-import.ts", source)
+            self.assertIn("discover", source)
+            self.assertIn("enrich", source)
+
+    @unittest.skipUnless(
+        shutil.which("deno") or shutil.which("deno.exe"), "deno required"
+    )
+    def test_resumable_yt_dlp_import_uses_flat_discovery_and_one_full_item(self) -> None:
+        addon_root = ROOT / "addons" / "org.ersatzrs.addon.yt-dlp"
+        with tempfile.TemporaryDirectory() as temporary:
+            fixtures = pathlib.Path(temporary)
+            playlist = fixtures / "playlist.json"
+            playlist.write_text(
+                '{"id":"playlist-1","title":"Fixture playlist",'
+                '"description":"Overview description","playlist_count":4,"entries":[{'
+                '"id":"video-1","title":"Overview title","description":"Overview plot",'
+                '"webpage_url":"https://www.youtube.com/watch?v=video-1",'
+                '"availability":"public","duration":42,"upload_date":"20240821",'
+                '"thumbnail":"https://images.example.test/thumb.jpg",'
+                '"live_status":"not_live"},{'
+                '"id":"live-1","title":"Live now",'
+                '"webpage_url":"https://www.youtube.com/watch?v=live-1",'
+                '"availability":"public","live_status":"is_live","is_live":true},{'
+                '"id":"upcoming-1","title":"Upcoming",'
+                '"webpage_url":"https://www.youtube.com/watch?v=upcoming-1",'
+                '"availability":"public","live_status":"is_upcoming","is_live":false},{'
+                '"id":"post-live-1","title":"Ended broadcast",'
+                '"webpage_url":"https://www.youtube.com/watch?v=post-live-1",'
+                '"availability":"public","live_status":"post_live","is_live":false}]}\n',
+                encoding="utf-8",
+            )
+            detail = fixtures / "detail.json"
+            detail.write_text(
+                '{"id":"video-1","title":"Detailed title",'
+                '"description":"Detailed plot",'
+                '"webpage_url":"https://www.youtube.com/watch?v=video-1",'
+                '"availability":"public","duration":43,"upload_date":"20240822",'
+                '"thumbnail":"https://images.example.test/detail.jpg",'
+                '"live_status":"not_live","categories":["Documentary"]}\n',
+                encoding="utf-8",
+            )
+            calls = fixtures / "calls.txt"
+            if os.name == "nt":
+                fake = fixtures / "fake-yt-dlp.cmd"
+                fake.write_text(
+                    '@echo off\n>>"%FAKE_CALLS%" echo %*\ntype "%FAKE_FIXTURE%"\n',
+                    encoding="utf-8",
+                )
+                command = [
+                    os.environ.get("COMSPEC", "cmd.exe"),
+                    "/d",
+                    "/c",
+                    str(addon_root / "addon.bat"),
+                ]
+            else:
+                fake = fixtures / "fake-yt-dlp"
+                fake.write_text(
+                    '#!/bin/sh\nprintf \'%s\\n\' "$*" >> "$FAKE_CALLS"\n'
+                    'cat "$FAKE_FIXTURE"\n',
+                    encoding="utf-8",
+                )
+                fake.chmod(0o755)
+                command = ["/bin/sh", str(addon_root / "addon.sh")]
+            environment = os.environ.copy()
+            environment.update(
+                {
+                    "YT_DLP_BIN": str(fake),
+                    "ERSATZRS_ADDON_SETTING_YT_DLP_BIN": str(fake),
+                    "FAKE_CALLS": str(calls),
+                    "FAKE_FIXTURE": str(playlist),
+                }
+            )
+            discover_request = {
+                "source_url": "https://www.youtube.com/playlist?list=fixture",
+                "record_capability": "media-list.list.v5",
+                "limits": {"max_items": 250, "max_output_bytes": 4_194_304},
+            }
+            discovered = subprocess.run(
+                [*command, "discover"],
+                input=json.dumps(discover_request),
+                check=False,
+                capture_output=True,
+                text=True,
+                env=environment,
+            )
+            self.assertEqual(discovered.returncode, 0, discovered.stderr)
+            rows = [json.loads(line) for line in discovered.stdout.splitlines()]
+            self.assertTrue(rows[0]["complete"])
+            self.assertEqual(rows[2]["metadata"]["plot"], "Overview plot")
+            self.assertEqual(rows[2]["metadata"]["release_date"], "2024-08-21")
+            self.assertEqual(
+                rows[2]["thumbnail_url"],
+                "https://images.example.test/thumb.jpg",
+            )
+            self.assertEqual(
+                [row["liveness"] for row in rows[2:]],
+                ["finite", "live", "live", "finite"],
+            )
+            discovery_calls = calls.read_text(encoding="utf-8").splitlines()
+            self.assertEqual(len(discovery_calls), 1)
+            self.assertIn("--flat-playlist", discovery_calls[0])
+
+            environment["FAKE_FIXTURE"] = str(detail)
+            enrich_request = {
+                "source_url": discover_request["source_url"],
+                "record_capability": "media-list.list.v5",
+                "provider_id": "video-1",
+                "overview_fingerprint": "fixture-fingerprint",
+                "item": rows[2],
+            }
+            enriched = subprocess.run(
+                [*command, "enrich"],
+                input=json.dumps(enrich_request),
+                check=False,
+                capture_output=True,
+                text=True,
+                env=environment,
+            )
+            self.assertEqual(enriched.returncode, 0, enriched.stderr)
+            detail_rows = [json.loads(line) for line in enriched.stdout.splitlines()]
+            self.assertEqual(detail_rows[0]["outcome"], "complete")
+            self.assertEqual(detail_rows[1]["title"], "Detailed title")
+            self.assertEqual(detail_rows[1]["metadata"]["release_date"], "2024-08-22")
+            all_calls = calls.read_text(encoding="utf-8").splitlines()
+            self.assertEqual(len(all_calls), 2)
+            self.assertNotIn("--flat-playlist", all_calls[1])
+            self.assertIn("--no-playlist", all_calls[1])
+            self.assertIn("watch?v=video-1", all_calls[1])
+
+        manifest = tomllib.loads((addon_root / "addon.toml").read_text(encoding="utf-8"))
+        capabilities = {item["id"] for item in manifest["capabilities"]}
+        self.assertIn("media-list.import.v1", capabilities)
+        self.assertIn("media-list.list.v5", capabilities)
+        for entrypoint in ["addon.sh", "addon.bat"]:
+            source = (addon_root / entrypoint).read_text(encoding="utf-8")
+            self.assertIn("media-list-import.ts", source)
+            self.assertIn("discover", source)
+            self.assertIn("enrich", source)
+
+        posix_source = (addon_root / "addon.sh").read_text(encoding="utf-8")
+        powershell_source = (addon_root / "libexec" / "youtube-list.ps1").read_text(
+            encoding="utf-8"
+        )
+        for provider_state in ["is_live", "is_upcoming", "post_live", "not_live"]:
+            self.assertIn(provider_state, posix_source)
+            self.assertIn(provider_state, powershell_source)
+        self.assertIn('"liveness":%(ersatzrs_liveness)j', posix_source)
+        self.assertIn('"is_live":%(ersatzrs_live_flag)s', posix_source)
+        self.assertIn("liveness = $liveness", powershell_source)
+
 
 if __name__ == "__main__":
     unittest.main()

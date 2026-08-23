@@ -9,6 +9,7 @@ const ITEM_KINDS = new Set([
   "remote_stream",
 ]);
 const AVAILABILITY = new Set(["available", "unavailable", "unknown"]);
+const LIVENESS = new Set(["unknown", "finite", "live"]);
 const CONTENT_KINDS = new Set([
   "auto",
   "television_episode",
@@ -189,7 +190,7 @@ function requiredText(source: JsonObject, field: string, line: number): string {
   return result;
 }
 
-function normalizeRecord(value: unknown, line: number): JsonObject {
+export function normalizeRecord(value: unknown, line: number): JsonObject {
   const source = object(value);
   if (!source) throw new Error(`line ${line} is not a JSON object`);
   const recordType = requiredText(source, "record_type", line);
@@ -233,6 +234,8 @@ function normalizeRecord(value: unknown, line: number): JsonObject {
     const candidate = text(source[field]);
     if (candidate) result[field] = candidate;
   }
+  const thumbnailUrl = safeHttpsUrl(source.thumbnail_url);
+  if (thumbnailUrl) result.thumbnail_url = thumbnailUrl;
   for (
     const field of [
       "duration_seconds",
@@ -247,6 +250,8 @@ function normalizeRecord(value: unknown, line: number): JsonObject {
   result.availability = AVAILABILITY.has(availability)
     ? availability
     : "unknown";
+  const liveness = text(source.liveness) ?? "unknown";
+  result.liveness = LIVENESS.has(liveness) ? liveness : "unknown";
   const contentKind = text(source.content_kind) ?? "auto";
   result.content_kind = CONTENT_KINDS.has(contentKind) ? contentKind : "auto";
   const collectionRole = text(source.collection_role) ?? "auto";
@@ -319,11 +324,13 @@ async function normalize(path: string): Promise<void> {
   if (count === 0) throw new Error("media-list output is empty");
 }
 
-const [operation, path] = Deno.args;
-if (!path || !["--extract-cards", "--normalize"].includes(operation)) {
-  throw new Error(
-    "usage: media-list-adapter.ts --extract-cards|--normalize <path>",
-  );
+if (import.meta.main) {
+  const [operation, path] = Deno.args;
+  if (!path || !["--extract-cards", "--normalize"].includes(operation)) {
+    throw new Error(
+      "usage: media-list-adapter.ts --extract-cards|--normalize <path>",
+    );
+  }
+  if (operation === "--extract-cards") await extractCards(path);
+  else await normalize(path);
 }
-if (operation === "--extract-cards") await extractCards(path);
-else await normalize(path);

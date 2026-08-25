@@ -35,7 +35,7 @@ interface OverviewItem {
   description?: string;
   releaseDate?: string;
   image?: string;
-  available: boolean;
+  playable?: boolean;
 }
 
 const decoder = new TextDecoder();
@@ -257,7 +257,6 @@ function extractOverviewItems(rawHtml: string): OverviewItem[] {
         description: descriptionFromCard(body),
         releaseDate: dateFromHtml(body),
         image: imageFromHtml(body),
-        available: true,
       },
     });
   }
@@ -277,7 +276,6 @@ function extractOverviewItems(rawHtml: string): OverviewItem[] {
         description: descriptionFromCard(body),
         releaseDate: dateFromHtml(body),
         image: imageFromHtml(body),
-        available: true,
       },
     });
   }
@@ -287,7 +285,7 @@ function extractOverviewItems(rawHtml: string): OverviewItem[] {
     const path = match.groups?.path;
     if (!path) continue;
     const tail = match.groups?.tail ?? "";
-    const playable = !/"isPlayable"\s*:\s*false/i.test(tail);
+    const playableMatch = tail.match(/"isPlayable"\s*:\s*(true|false)/i);
     candidates.push({
       index: match.index,
       item: {
@@ -296,18 +294,42 @@ function extractOverviewItems(rawHtml: string): OverviewItem[] {
         description: lastJsonString(tail, "description"),
         releaseDate: dateFromHtml(tail),
         image: imageFromHtml(tail),
-        available: playable,
+        playable: playableMatch
+          ? playableMatch[1].toLocaleLowerCase() === "true"
+          : undefined,
       },
     });
   }
   candidates.sort((left, right) => left.index - right.index);
-  const seen = new Set<string>();
-  return candidates.flatMap(({ item }) => {
+  const merged = new Map<string, OverviewItem>();
+  for (const { item } of candidates) {
     const id = item.path.split("/").at(-1);
-    if (!id || seen.has(id)) return [];
-    seen.add(id);
-    return [item];
-  });
+    if (!id) continue;
+    const existing = merged.get(id);
+    if (!existing) {
+      merged.set(id, item);
+      continue;
+    }
+    existing.title = richerText(existing.title, item.title) ?? existing.title;
+    existing.description = richerText(existing.description, item.description);
+    existing.releaseDate ??= item.releaseDate;
+    existing.image ??= item.image;
+    if (item.playable === false || existing.playable === false) {
+      existing.playable = false;
+    } else if (item.playable === true || existing.playable === true) {
+      existing.playable = true;
+    }
+  }
+  return [...merged.values()];
+}
+
+function richerText(
+  current: string | undefined,
+  candidate: string | undefined,
+): string | undefined {
+  if (!current) return candidate;
+  if (!candidate) return current;
+  return candidate.length > current.length ? candidate : current;
 }
 
 function encodeCursor(cursor: Cursor): string {
@@ -470,8 +492,8 @@ function overviewRecord(item: OverviewItem, rank: number): JsonObject {
     kind: "remote_stream",
     guids: [`beeldengeluid://${episodeId}`],
     source_url: `${providerOrigin}${item.path}`,
-    availability: item.available ? "available" : "unavailable",
-    availability_reason: item.available ? undefined : "not_playable",
+    availability: item.playable === false ? "unavailable" : "available",
+    availability_reason: item.playable === false ? "not_playable" : undefined,
     content_kind: "auto",
     liveness: "finite",
     thumbnail_url: item.image,
@@ -501,7 +523,6 @@ async function discover(request: DiscoverRequest): Promise<void> {
     const item: OverviewItem = {
       path,
       title: titleFromPath(path),
-      available: true,
     };
     emit({ record_type: "page", complete: true, total_hint: 1 });
     emit(listHeader(request.source_url, ""));
@@ -728,10 +749,42 @@ async function enrich(request: EnrichRequest): Promise<void> {
 }
 
 const operation = Deno.args[0];
-const input = await new Response(Deno.stdin.readable).text();
-if (!input.trim()) throw new Error("media-list import request is missing");
-if (operation === "discover") {
-  await discover(JSON.parse(input) as DiscoverRequest);
-} else if (operation === "enrich") {
-  await enrich(JSON.parse(input) as EnrichRequest);
-} else throw new Error("usage: media-list-import.ts discover|enrich");
+if (["--extract-overview", "--extract-overview-tsv"].includes(operation)) {
+  const path = Deno.args[1];
+  if (!path) throw new Error("overview HTML path is missing");
+  const html = await Deno.readTextFile(path);
+  for (const item of extractOverviewItems(html)) {
+    const availability = item.playable === false ? "unavailable" : "available";
+    if (operation === "--extract-overview-tsv") {
+      console.log([
+        item.path,
+        availability,
+        JSON.stringify(item.title),
+        JSON.stringify(item.description ?? null),
+        JSON.stringify(item.releaseDate ?? null),
+        JSON.stringify(item.image ?? null),
+      ].join("\t"));
+    } else {
+      emit({
+        path: item.path,
+        title: item.title,
+        description: item.description,
+        release_date: item.releaseDate,
+        image: item.image,
+        availability,
+      });
+    }
+  }
+} else {
+  const input = await new Response(Deno.stdin.readable).text();
+  if (!input.trim()) throw new Error("media-list import request is missing");
+  if (operation === "discover") {
+    await discover(JSON.parse(input) as DiscoverRequest);
+  } else if (operation === "enrich") {
+    await enrich(JSON.parse(input) as EnrichRequest);
+  } else {
+    throw new Error(
+      "usage: media-list-import.ts discover|enrich|--extract-overview <path>",
+    );
+  }
+}

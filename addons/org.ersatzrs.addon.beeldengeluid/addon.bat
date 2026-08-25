@@ -42,12 +42,16 @@ exit /b 0
 :list
 if defined ERSATZRS_MEDIA_LIST_URL (
     set "BEELDENGELUID_OUTPUT=media-list"
-    call "%~dp0libexec\beeldengeluid.bat" list "%ERSATZRS_MEDIA_LIST_URL%"
+    rem Pass the operator URL through the environment. CALL reparses percent
+    rem escapes such as %%20 when they appear in an argument.
+    set "PLAYLIST_URL=%ERSATZRS_MEDIA_LIST_URL%"
+    call "%~dp0libexec\beeldengeluid.bat" list
     if errorlevel 1 goto :provider_failed
     exit /b 0
 )
 if not defined ERSATZRS_REMOTE_STREAM_PLAYLIST_URL goto :missing_playlist_url
-call "%~dp0libexec\beeldengeluid.bat" list "%ERSATZRS_REMOTE_STREAM_PLAYLIST_URL%"
+set "PLAYLIST_URL=%ERSATZRS_REMOTE_STREAM_PLAYLIST_URL%"
+call "%~dp0libexec\beeldengeluid.bat" list
 if errorlevel 1 goto :provider_failed
 exit /b 0
 

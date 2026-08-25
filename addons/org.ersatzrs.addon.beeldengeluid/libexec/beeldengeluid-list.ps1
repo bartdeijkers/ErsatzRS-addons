@@ -34,6 +34,35 @@ function Invoke-CurlToFile([string]$url, [string]$output, [string]$failure) {
     if ($LASTEXITCODE -ne 0) { throw $failure }
 }
 
+function Get-PageUrl([Uri]$source, [int]$page) {
+    $parameters = [Collections.Generic.List[string]]::new()
+    $wrotePage = $false
+    foreach ($part in @($source.Query.TrimStart('?') -split '&')) {
+        if (-not $part) { continue }
+        $separator = $part.IndexOf('=')
+        $name = if ($separator -ge 0) { $part.Substring(0, $separator) } else { $part }
+        if ([Uri]::UnescapeDataString($name) -ieq 'pagina') {
+            if (-not $wrotePage) {
+                $parameters.Add('pagina=' + $page)
+                $wrotePage = $true
+            }
+            continue
+        }
+        $parameters.Add($part)
+    }
+    if (-not $wrotePage) { $parameters.Add('pagina=' + $page) }
+    return $source.GetLeftPart([UriPartial]::Path) + '?' + ($parameters -join '&')
+}
+
+function Get-OverviewItems([string]$htmlPath) {
+    $importer = Join-Path $PSScriptRoot 'media-list-import.ts'
+    $rows = @(
+        & deno.exe run --quiet --allow-env=CURL_BIN "--allow-read=$htmlPath" $importer --extract-overview $htmlPath
+    )
+    if ($LASTEXITCODE -ne 0) { throw 'episode overview metadata was invalid' }
+    return @($rows | ForEach-Object { $_ | ConvertFrom-Json })
+}
+
 function Add-CardImages([string]$htmlPath, [hashtable]$imageByPath) {
     $adapter = Join-Path $PSScriptRoot 'media-list-adapter.ts'
     $rows = @(
@@ -61,7 +90,6 @@ try {
         throw 'unsupported playlist URL'
     }
 
-    $base = $uri.GetLeftPart([UriPartial]::Path).TrimEnd('/')
     $mediaListMode = $env:BEELDENGELUID_OUTPUT -eq 'media-list'
     $mediaListRows = [Collections.Generic.List[string]]::new()
     $sharedListName = ''
@@ -76,20 +104,17 @@ try {
         $paths = [Collections.Generic.List[string]]::new()
         $availabilityByPath = @{}
         $imageByPath = @{}
+        $overviewByPath = @{}
 
         if ($isVideo) {
             $paths.Add($uri.AbsolutePath.TrimEnd('/'))
             $availabilityByPath[$uri.AbsolutePath.TrimEnd('/')] = 'available'
         } elseif ($isSeries -or $isSearch) {
             for ($page = 1; ; $page++) {
-                $pageUrl = if ($isSearch) {
-                    $uri.GetLeftPart([UriPartial]::Path) + $uri.Query + '&pagina=' + $page
-                } else {
-                    $base + '?pagina=' + $page
-                }
+                $pageUrl = Get-PageUrl $uri $page
                 Invoke-CurlToFile $pageUrl $pageFile 'programme-list page request failed'
                 $html = [IO.File]::ReadAllText($pageFile)
-                Add-CardImages $pageFile $imageByPath
+                $overviewItems = @(Get-OverviewItems $pageFile)
                 if ($page -eq 1 -and $isSeries) {
                     foreach ($script in [regex]::Matches(
                         $html,
@@ -106,14 +131,13 @@ try {
                     }
                 }
                 $added = 0
-                foreach ($match in [regex]::Matches(
-                    $html,
-                    'href=\x22(/serie/\d+/[^\x22/]+/aflevering/\d+)\x22'
-                )) {
-                    $path = $match.Groups[1].Value
+                foreach ($overview in $overviewItems) {
+                    $path = [string]$overview.path
                     if ($seen.Add($path)) {
                         $paths.Add($path)
-                        $availabilityByPath[$path] = 'available'
+                        $availabilityByPath[$path] = [string]$overview.availability
+                        $overviewByPath[$path] = $overview
+                        if ($overview.image) { $imageByPath[$path] = [string]$overview.image }
                         $added++
                     }
                 }
@@ -124,13 +148,10 @@ try {
             }
         } else {
             $skipped = 0
-            $pattern = '\\\x22url\\\x22:\\\x22' +
-                '(https://schatkamer[.]beeldengeluid[.]nl/serie/\d+/[^\\\x22/]+/aflevering/\d+)' +
-                '\\\x22.*?\\\x22isPlayable\\\x22:(true|false)'
             for ($page = 1; ; $page++) {
-                Invoke-CurlToFile ($base + '?pagina=' + $page) $pageFile 'shared-list page request failed'
+                Invoke-CurlToFile (Get-PageUrl $uri $page) $pageFile 'shared-list page request failed'
                 $html = [IO.File]::ReadAllText($pageFile)
-                Add-CardImages $pageFile $imageByPath
+                $overviewItems = @(Get-OverviewItems $pageFile)
                 if ($page -eq 1) {
                     if (-not [regex]::IsMatch(
                         $html,
@@ -147,15 +168,15 @@ try {
                     }
                 }
                 $added = 0
-                foreach ($match in [regex]::Matches($html, $pattern, 'Singleline')) {
-                    $path = ([Uri]$match.Groups[1].Value).AbsolutePath
+                foreach ($overview in $overviewItems) {
+                    $path = [string]$overview.path
                     if (-not $seen.Add($path)) { continue }
                     $paths.Add($path)
+                    $overviewByPath[$path] = $overview
+                    if ($overview.image) { $imageByPath[$path] = [string]$overview.image }
                     $added++
-                    if ($match.Groups[2].Value -eq 'true') {
-                        $availabilityByPath[$path] = 'available'
-                    } else {
-                        $availabilityByPath[$path] = 'unavailable'
+                    $availabilityByPath[$path] = [string]$overview.availability
+                    if ($overview.availability -eq 'unavailable') {
                         $skipped++
                     }
                 }
@@ -203,15 +224,27 @@ try {
             $availability = if ($availabilityByPath.ContainsKey($path)) {
                 $availabilityByPath[$path]
             } else { 'available' }
-            try {
-                Invoke-CurlToFile $episodeUrl $episodeFile 'episode metadata request failed'
-            } catch {
-                if ($availability -ne 'unavailable') { throw }
+            if ($availability -eq 'unavailable') {
                 $segments = $path.Trim('/').Split('/')
                 $slug = if ($segments.Count -ge 3) {
                     [Uri]::UnescapeDataString($segments[$segments.Count - 3]).Replace('-', ' ').Replace('_', ' ')
                 } else { '' }
-                $title = if ($slug) { $slug } else { $episodeId }
+                $overview = if ($overviewByPath.ContainsKey($path)) {
+                    $overviewByPath[$path]
+                } else { $null }
+                $title = if ($overview -and $overview.title) {
+                    [string]$overview.title
+                } elseif ($slug) { $slug } else { $episodeId }
+                $plot = if ($overview -and $overview.description) {
+                    [string]$overview.description
+                } else { $null }
+                $releaseDate = if (
+                    $overview -and [string]$overview.release_date -match
+                        '^([0-9]{4}-[0-9]{2}-[0-9]{2})$'
+                ) { $Matches[1] } else { $null }
+                $episodeImage = if ($overview -and $overview.image) {
+                    [string]$overview.image
+                } else { $null }
                 if ($mediaListMode) {
                     $item = [ordered]@{
                         record_type = 'item'
@@ -225,15 +258,26 @@ try {
                         availability = 'unavailable'
                         availability_reason = 'not_playable'
                         content_kind = 'auto'
-                        metadata = [ordered]@{
-                            title = $title
-                            guids = @('beeldengeluid://' + $episodeId)
-                        }
                     }
-                    $mediaListRows.Add(($item | ConvertTo-Json -Depth 2 -Compress))
+                    if ($releaseDate) { $item.year = [int]$releaseDate.Substring(0, 4) }
+                    if ($episodeImage) {
+                        $item.thumbnail_url = $episodeImage
+                        $item.additional_image_urls = @($episodeImage)
+                    }
+                    $item.metadata = [ordered]@{
+                        title = $title
+                        plot = $plot
+                        year = if ($releaseDate) { [int]$releaseDate.Substring(0, 4) } else { $null }
+                        release_date = $releaseDate
+                        artwork = if ($episodeImage) {
+                            @([ordered]@{ role = 'thumb'; url = $episodeImage })
+                        } else { @() }
+                        guids = @('beeldengeluid://' + $episodeId)
+                    }
+                    $mediaListRows.Add(($item | ConvertTo-Json -Depth 6 -Compress))
                     $rank++
                 } else {
-                    [ordered]@{
+                    $row = [ordered]@{
                         id = $episodeId
                         provider_id = 'episode:' + $episodeId
                         url = $episodeUrl
@@ -243,10 +287,21 @@ try {
                         content_kind = 'auto'
                         guids = @('beeldengeluid://' + $episodeId)
                         is_live = $false
-                    } | ConvertTo-Json -Depth 2 -Compress
+                    }
+                    if ($plot) { $row.plot = $plot }
+                    if ($releaseDate) {
+                        $row.release_date = $releaseDate
+                        $row.year = [int]$releaseDate.Substring(0, 4)
+                    }
+                    if ($episodeImage) {
+                        $row.thumbnail_url = $episodeImage
+                        $row.additional_image_urls = @($episodeImage)
+                    }
+                    $row | ConvertTo-Json -Depth 2 -Compress
                 }
                 continue
             }
+            Invoke-CurlToFile $episodeUrl $episodeFile 'episode metadata request failed'
             $html = [IO.File]::ReadAllText($episodeFile)
             $programMarker = '\' + [char]34 + 'program\' + [char]34 +
                 ':{\' + [char]34 + 'id\' + [char]34 + ':\' + [char]34 +

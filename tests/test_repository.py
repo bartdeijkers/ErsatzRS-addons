@@ -21,6 +21,140 @@ class RepositoryTests(unittest.TestCase):
         self.assertTrue(payload["message"])
         return payload
 
+    def beeldengeluid_strip_overview(self) -> tuple[str, list[str]]:
+        episode_ids = [
+            "2101608050040897825",
+            "2101608050040897826",
+            "2101608050040897827",
+            "2101608050040897828",
+            "2101608050040897829",
+            "2101608050040897830",
+            "2101608050040897831",
+            "2101608050040897832",
+        ]
+        cards = []
+        embedded = []
+        for rank, episode_id in enumerate(episode_ids):
+            path = (
+                "/serie/2101608030022428031/strip-en-cartoontekenen/aflevering/"
+                + episode_id
+            )
+            cards.append(
+                f'<li><a data-gtm-interaction-text="Les {rank + 1}" href="{path}">'
+                f'<img src="https://schatkamer.beeldengeluid.nl/assets/card-{rank + 1}.jpg">'
+                f'<h3>Les {rank + 1}</h3></a><p>Korte beschrijving {rank + 1}</p></li>'
+            )
+            release_date = "1993-03-07" if rank == 6 else f"1993-02-{rank + 1:02d}"
+            provider_title = (
+                "Les 7: Cartoon, strook en paginaverhaal"
+                if rank == 6
+                else f"Strip- en cartoontekenen - Aflevering {rank + 1}"
+            )
+            embedded.append(
+                {
+                    "url": "https://schatkamer.beeldengeluid.nl" + path,
+                    "isPlayable": rank != 6,
+                    "title": provider_title,
+                    "description": f"Uitgebreide providerbeschrijving voor les {rank + 1}.",
+                    "publishedAtISO": release_date + "T12:00:00Z",
+                    "image": (
+                        "https://schatkamer.beeldengeluid.nl/assets/"
+                        f"provider-{rank + 1}.jpg"
+                    ),
+                }
+            )
+        return "".join(cards) + f"<script>{json.dumps(embedded)}</script>", episode_ids
+
+    def run_resumable_beeldengeluid_discover(
+        self, source_url: str, overview: str
+    ) -> tuple[subprocess.CompletedProcess[str], list[str]]:
+        addon_root = ROOT / "addons" / "org.ersatzrs.addon.beeldengeluid"
+        with tempfile.TemporaryDirectory() as temporary:
+            fixtures = pathlib.Path(temporary)
+            fixture = fixtures / "overview.html"
+            fixture.write_text(overview, encoding="utf-8")
+            calls = fixtures / "calls.txt"
+            if os.name == "nt":
+                project = fixtures / "FakeCurl.csproj"
+                project.write_text(
+                    '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup>'
+                    '<OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework>'
+                    '<ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable>'
+                    '</PropertyGroup></Project>',
+                    encoding="utf-8",
+                )
+                (fixtures / "Program.cs").write_text(
+                    'var calls = Environment.GetEnvironmentVariable("FAKE_CALLS")!;\n'
+                    'var fixture = Environment.GetEnvironmentVariable("FAKE_FIXTURE")!;\n'
+                    'File.AppendAllText(calls, string.Join(" ", args) + Environment.NewLine);\n'
+                    'Console.WriteLine(File.ReadAllText(fixture));\n'
+                    'Console.WriteLine("__ERSATZRS_HTTP_STATUS__:200");\n',
+                    encoding="utf-8",
+                )
+                output = fixtures / "fake-curl-bin"
+                compiled = subprocess.run(
+                    [
+                        shutil.which("dotnet") or "dotnet",
+                        "build",
+                        str(project),
+                        "--nologo",
+                        "--configuration",
+                        "Release",
+                        "--output",
+                        str(output),
+                        "-p:RestoreIgnoreFailedSources=true",
+                    ],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    env={
+                        **os.environ,
+                        "DOTNET_CLI_HOME": str(fixtures),
+                        "DOTNET_CLI_TELEMETRY_OPTOUT": "1",
+                        "DOTNET_SKIP_FIRST_TIME_EXPERIENCE": "1",
+                    },
+                )
+                self.assertEqual(compiled.returncode, 0, compiled.stderr)
+                fake = output / "FakeCurl.exe"
+                command = [
+                    os.environ.get("COMSPEC", "cmd.exe"),
+                    "/d",
+                    "/c",
+                    str(addon_root / "addon.bat"),
+                ]
+            else:
+                fake = fixtures / "fake-curl"
+                fake.write_text(
+                    '#!/bin/sh\nprintf \'%s\\n\' "$*" >> "$FAKE_CALLS"\n'
+                    'cat "$FAKE_FIXTURE"\nprintf \'\\n__ERSATZRS_HTTP_STATUS__:200\'\n',
+                    encoding="utf-8",
+                )
+                fake.chmod(0o755)
+                command = ["/bin/sh", str(addon_root / "addon.sh")]
+            environment = os.environ.copy()
+            environment.update(
+                {
+                    "CURL_BIN": str(fake),
+                    "ERSATZRS_ADDON_SETTING_CURL_BIN": str(fake),
+                    "FAKE_CALLS": str(calls),
+                    "FAKE_FIXTURE": str(fixture),
+                }
+            )
+            request = {
+                "source_url": source_url,
+                "record_capability": "media-list.list.v5",
+                "limits": {"max_items": 250, "max_output_bytes": 4_194_304},
+            }
+            result = subprocess.run(
+                [*command, "discover"],
+                input=json.dumps(request),
+                check=False,
+                capture_output=True,
+                text=True,
+                env=environment,
+            )
+            return result, calls.read_text(encoding="utf-8").splitlines()
+
     def run_posix_beeldengeluid_list(
         self,
         playlist_url: str,
@@ -76,15 +210,20 @@ while [ "$#" -gt 0 ]; do
     shift
 done
 case "$url" in
-    */lijst/*'pagina=1') source_file=$FAKE_FIXTURES/list.html ;;
-    */lijst/*'pagina=2') source_file=$FAKE_FIXTURES/list-2.html ;;
+    */lijst/*'pagina=1'*) source_file=$FAKE_FIXTURES/list.html ;;
+    */lijst/*'pagina=2'*) source_file=$FAKE_FIXTURES/list-2.html ;;
     */lijst/*'pagina='*) source_file=$FAKE_FIXTURES/empty.html ;;
-    *'pagina=1') source_file=$FAKE_FIXTURES/series.html ;;
+    *'pagina=1'*) source_file=$FAKE_FIXTURES/series.html ;;
     *'pagina='*) source_file=$FAKE_FIXTURES/empty.html ;;
     */aflevering/102) exit 22 ;;
+    */aflevering/2101608050040897831)
+        printf 'unexpected-detail-request: %s\n' "$url" >&2
+        exit 22
+        ;;
     */aflevering/*) source_file=$FAKE_FIXTURES/episode.html ;;
     *) exit 22 ;;
 esac
+printf 'fake-curl-url: %s\n' "$url" >&2
 cp "$source_file" "$output"
 """,
                 encoding="utf-8",
@@ -116,11 +255,17 @@ cp "$source_file" "$output"
                 env=environment,
             )
 
-    def run_windows_beeldengeluid_media_list(self) -> subprocess.CompletedProcess[str]:
+    def run_windows_beeldengeluid_media_list(
+        self,
+        playlist_url: str = "https://schatkamer.beeldengeluid.nl/serie/20/fixture",
+        series_page: str | None = None,
+        list_page: str = "<html></html>",
+        episode_page: str | None = None,
+    ) -> subprocess.CompletedProcess[str]:
         addon = ROOT / "addons" / "org.ersatzrs.addon.beeldengeluid" / "addon.bat"
         with tempfile.TemporaryDirectory() as temporary:
             fixtures = pathlib.Path(temporary)
-            (fixtures / "series.html").write_text(
+            default_series_page = (
                 '<script type="application/ld+json">'
                 '{"@context":"https://schema.org","@type":"CreativeWorkSeries",'
                 '"name":"Fixture Programme","description":"Fixture introduction",'
@@ -128,14 +273,18 @@ cp "$source_file" "$output"
                 '</script><a href="/serie/20/fixture/aflevering/201">'
                 '<img src="https://schatkamer.beeldengeluid.nl/image-optimizer?'
                 'url=aHR0cHM6Ly9zay12aWRlby5jZG4uYmVlbGRlbmdlbHVpZC5ubC9maXh0dXJlL3N0aWxsLmpwZw'
-                '&amp;width=640&amp;quality=80&amp;format=webp"></a>',
+                '&amp;width=640&amp;quality=80&amp;format=webp"></a>'
+            )
+            (fixtures / "series.html").write_text(
+                series_page if series_page is not None else default_series_page,
                 encoding="utf-8",
             )
+            (fixtures / "list.html").write_text(list_page, encoding="utf-8")
             (fixtures / "empty.html").write_text("<html></html>", encoding="utf-8")
-            (fixtures / "episode.html").write_text(
+            default_episode_page = (
                 '<h1>Fixture Programme</h1><h3>First Episode</h3>'
                 '<script>{"image":"https://schatkamer.beeldengeluid.nl/assets/episode.jpg"};'
-                r'\"program\":{\"id\":\"201\",'
+                r'\"program\":{\"id\":\"__EPISODE_ID__\",'
                 r'\"description\":\"Fixture plot\",\"disclaimer\":null,'
                 r'\"durationNumber\":120,\"publishedAtISO\":\"1993-01-24T12:30:00Z\",'
                 r'\"ageRating\":\"Alle leeftijden\",\"genres\":[\"Education\"],'
@@ -146,7 +295,10 @@ cp "$source_file" "$output"
                 r'\"genres\":[\"Education\"],'
                 r'\"originalBroadcasters\":[{\"name\":\"Original TV\"}],'
                 r'\"broadcaster\":null,\"broadcasters\":[{\"name\":\"Current TV\"}],'
-                r'\"url\":\"fixture\"</script>',
+                r'\"url\":\"fixture\"</script>'
+            )
+            (fixtures / "episode.html").write_text(
+                episode_page if episode_page is not None else default_episode_page,
                 encoding="utf-8",
             )
             fake_curl = fixtures / "fake-curl.ps1"
@@ -164,16 +316,24 @@ for ($index = 0; $index -lt $args.Count; $index++) {
     }
 }
 if (-not $output -or -not $url) { exit 22 }
-if ($url -like '*/aflevering/201') {
-    $source = 'episode.html'
+if ($url -match '/aflevering/(\d+)$') {
+    if ($Matches[1] -eq '2101608050040897831') {
+        [Console]::Error.WriteLine("unexpected-detail-request: $url")
+        exit 22
+    }
+    $content = [IO.File]::ReadAllText((Join-Path $env:FAKE_FIXTURES 'episode.html'))
+    [IO.File]::WriteAllText($output, $content.Replace('__EPISODE_ID__', $Matches[1]))
+    [Console]::Error.WriteLine("fake-curl-url: $url")
+    exit 0
 } elseif ($url -like '*pagina=1*') {
-    $source = 'series.html'
+    $source = if ($url -like '*/lijst/*') { 'list.html' } else { 'series.html' }
 } elseif ($url -like '*pagina=*') {
     $source = 'empty.html'
 } else {
     Write-Error "Unexpected fixture URL: $url"
     exit 22
 }
+[Console]::Error.WriteLine("fake-curl-url: $url")
 Copy-Item -LiteralPath (Join-Path $env:FAKE_FIXTURES $source) -Destination $output
 exit 0
 """,
@@ -183,9 +343,7 @@ exit 0
             environment.update(
                 {
                     "ERSATZRS_ADDON_SETTING_CURL_BIN": str(fake_curl),
-                    "ERSATZRS_MEDIA_LIST_URL": (
-                        "https://schatkamer.beeldengeluid.nl/serie/20/fixture"
-                    ),
+                    "ERSATZRS_MEDIA_LIST_URL": playlist_url,
                     "FAKE_FIXTURES": str(fixtures),
                     "TEMP": str(fixtures),
                     "TMP": str(fixtures),
@@ -666,7 +824,9 @@ exit 0
         )
 
     @unittest.skipUnless(
-        shutil.which("deno") or shutil.which("deno.exe"), "deno required"
+        (shutil.which("deno") or shutil.which("deno.exe"))
+        and (os.name != "nt" or shutil.which("dotnet")),
+        "deno and a native fake-curl build tool required",
     )
     def test_beeldengeluid_adapter_normalizes_the_v4_contract_boundary(self) -> None:
         adapter = (
@@ -1053,7 +1213,15 @@ printf '%s\n' '{"title":"Fixture playlist","description":"Fixture list descripti
         self.assertIn(r"([^\\\x22]*)\\\x22,\\\x22description", source)
         self.assertIn("$sharedListName", source)
         self.assertIn("name = $listName", source)
-        self.assertIn("isPlayable", source)
+        importer = (
+            ROOT
+            / "addons"
+            / "org.ersatzrs.addon.beeldengeluid"
+            / "libexec"
+            / "media-list-import.ts"
+        ).read_text(encoding="utf-8")
+        self.assertIn("isPlayable", importer)
+        self.assertIn("--extract-overview", source)
         self.assertIn("$seen.Add($path)", source)
         self.assertIn(
             "('beeldengeluid.bat: result page {0} yielded {1} new episode(s)' -f $page, $added)",
@@ -1139,6 +1307,216 @@ printf '%s\n' '{"title":"Fixture playlist","description":"Fixture list descripti
             rows[1]["metadata"]["people"],
             [{"name": "Presenter One", "role": "presenter"}],
         )
+
+    @unittest.skipUnless(
+        shutil.which("deno") or shutil.which("deno.exe"), "deno required"
+    )
+    def test_resumable_beeldengeluid_merges_eight_provider_ordered_items(self) -> None:
+        overview, episode_ids = self.beeldengeluid_strip_overview()
+        source_url = (
+            "https://schatkamer.beeldengeluid.nl/serie/2101608030022428031/"
+            "strip-en-cartoontekenen"
+            "?alleenafspeelbaar=nee&operator=strip&pagina=99&operator=tekenen"
+        )
+        result, calls = self.run_resumable_beeldengeluid_discover(source_url, overview)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        rows = [json.loads(line) for line in result.stdout.splitlines()]
+        items = [row for row in rows if row.get("record_type") == "item"]
+        self.assertEqual(
+            [row["provider_id"] for row in items],
+            [f"episode:{episode_id}" for episode_id in episode_ids],
+        )
+        self.assertEqual([row["rank"] for row in items], list(range(8)))
+        unavailable = items[6]
+        self.assertEqual(unavailable["provider_id"], "episode:2101608050040897831")
+        self.assertEqual(unavailable["rank"], 6)
+        self.assertEqual(
+            unavailable["title"], "Les 7: Cartoon, strook en paginaverhaal"
+        )
+        self.assertEqual(unavailable["metadata"]["plot"], "Uitgebreide providerbeschrijving voor les 7.")
+        self.assertEqual(unavailable["metadata"]["release_date"], "1993-03-07")
+        self.assertEqual(unavailable["availability"], "unavailable")
+        self.assertEqual(unavailable["availability_reason"], "not_playable")
+        self.assertEqual(len(calls), 1)
+        self.assertIn(
+            "https://schatkamer.beeldengeluid.nl/serie/2101608030022428031/"
+            "strip-en-cartoontekenen"
+            "?alleenafspeelbaar=nee&operator=strip&pagina=1&operator=tekenen",
+            calls[0],
+        )
+
+    @unittest.skipUnless(
+        pathlib.Path("/bin/sh").exists()
+        and (shutil.which("deno") or shutil.which("deno.exe")),
+        "POSIX shell and deno required",
+    )
+    def test_posix_legacy_beeldengeluid_merges_eight_provider_ordered_items(self) -> None:
+        overview, episode_ids = self.beeldengeluid_strip_overview()
+        source_url = (
+            "https://schatkamer.beeldengeluid.nl/serie/2101608030022428031/"
+            "strip-en-cartoontekenen"
+            "?alleenafspeelbaar=nee&operator=strip&pagina=99&operator=tekenen"
+        )
+        result = self.run_posix_beeldengeluid_list(
+            source_url,
+            "",
+            media_list_contract=True,
+            series_page=overview,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        rows = [json.loads(line) for line in result.stdout.splitlines()]
+        items = rows[1:]
+        self.assertEqual(
+            [row["provider_id"] for row in items],
+            [f"episode:{episode_id}" for episode_id in episode_ids],
+        )
+        unavailable = items[6]
+        self.assertEqual(unavailable["rank"], 6)
+        self.assertEqual(unavailable["metadata"]["release_date"], "1993-03-07")
+        self.assertEqual(unavailable["availability"], "unavailable")
+        self.assertEqual(unavailable["availability_reason"], "not_playable")
+        self.assertNotIn("unexpected-detail-request", result.stderr)
+        self.assertIn(
+            "fake-curl-url: https://schatkamer.beeldengeluid.nl/serie/"
+            "2101608030022428031/strip-en-cartoontekenen?alleenafspeelbaar=nee&"
+            "operator=strip&pagina=1&operator=tekenen",
+            result.stderr,
+        )
+
+    @unittest.skipUnless(
+        os.name == "nt" and (shutil.which("powershell.exe") or shutil.which("pwsh")),
+        "native Windows PowerShell required",
+    )
+    def test_windows_legacy_beeldengeluid_merges_eight_provider_ordered_items(self) -> None:
+        overview, episode_ids = self.beeldengeluid_strip_overview()
+        source_url = (
+            "https://schatkamer.beeldengeluid.nl/serie/2101608030022428031/"
+            "strip-en-cartoontekenen"
+            "?alleenafspeelbaar=nee&operator=strip&pagina=99&operator=tekenen"
+        )
+        result = self.run_windows_beeldengeluid_media_list(
+            playlist_url=source_url,
+            series_page=overview,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        rows = [json.loads(line) for line in result.stdout.splitlines()]
+        items = rows[1:]
+        self.assertEqual(
+            [row["provider_id"] for row in items],
+            [f"episode:{episode_id}" for episode_id in episode_ids],
+        )
+        unavailable = items[6]
+        self.assertEqual(unavailable["rank"], 6)
+        self.assertEqual(unavailable["metadata"]["release_date"], "1993-03-07")
+        self.assertEqual(unavailable["availability"], "unavailable")
+        self.assertEqual(unavailable["availability_reason"], "not_playable")
+        self.assertNotIn("unexpected-detail-request", result.stderr)
+        self.assertIn(
+            "fake-curl-url: https://schatkamer.beeldengeluid.nl/serie/"
+            "2101608030022428031/strip-en-cartoontekenen?alleenafspeelbaar=nee&"
+            "operator=strip&pagina=1&operator=tekenen",
+            result.stderr,
+        )
+
+    def beeldengeluid_unavailable_overview(self, shared: bool = False) -> str:
+        prefix = (
+            r'<script>\"title\":\"Fixture\",\"description\":\"Gedeelde lijst\",'
+            if shared
+            else "<script>"
+        )
+        return (
+            prefix
+            + '{"url":"https://schatkamer.beeldengeluid.nl/serie/20/'
+            'strip-en-cartoontekenen/aflevering/2101608050040897831",'
+            '"isPlayable":false,"title":"Niet afspeelbaar",'
+            '"publishedAtISO":"1993-03-07T12:00:00Z"}</script>'
+        )
+
+    @unittest.skipUnless(
+        pathlib.Path("/bin/sh").exists()
+        and (shutil.which("deno") or shutil.which("deno.exe")),
+        "POSIX shell and deno required",
+    )
+    def test_posix_legacy_beeldengeluid_pagination_preserves_operator_queries(self) -> None:
+        shared_id = "14df8d33-ce8a-4680-a83b-0cc2a9c58bcd"
+        cases = [
+            (
+                "https://schatkamer.beeldengeluid.nl/serie/20/fixture"
+                "?operator=een&pagina=99&operator=twee",
+                "https://schatkamer.beeldengeluid.nl/serie/20/fixture"
+                "?operator=een&pagina=1&operator=twee",
+                False,
+            ),
+            (
+                f"https://schatkamer.beeldengeluid.nl/lijst/{shared_id}"
+                "?eigenaar=operator&pagina=99&sortering=oudste",
+                f"https://schatkamer.beeldengeluid.nl/lijst/{shared_id}"
+                "?eigenaar=operator&pagina=1&sortering=oudste",
+                True,
+            ),
+            (
+                "https://schatkamer.beeldengeluid.nl/zoeken"
+                "?term=strip%20cartoon&type=video&pagina=99",
+                "https://schatkamer.beeldengeluid.nl/zoeken"
+                "?term=strip%20cartoon&type=video&pagina=1",
+                False,
+            ),
+        ]
+        for source_url, expected_page, shared in cases:
+            with self.subTest(source_url=source_url):
+                overview = self.beeldengeluid_unavailable_overview(shared)
+                result = self.run_posix_beeldengeluid_list(
+                    source_url,
+                    overview if shared else "",
+                    media_list_contract=True,
+                    series_page=overview,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("fake-curl-url: " + expected_page, result.stderr)
+                self.assertNotIn("pagina=99", result.stderr)
+                self.assertNotIn("unexpected-detail-request", result.stderr)
+
+    @unittest.skipUnless(
+        os.name == "nt" and (shutil.which("powershell.exe") or shutil.which("pwsh")),
+        "native Windows PowerShell required",
+    )
+    def test_windows_legacy_beeldengeluid_pagination_preserves_operator_queries(self) -> None:
+        shared_id = "14df8d33-ce8a-4680-a83b-0cc2a9c58bcd"
+        cases = [
+            (
+                "https://schatkamer.beeldengeluid.nl/serie/20/fixture"
+                "?operator=een&pagina=99&operator=twee",
+                "https://schatkamer.beeldengeluid.nl/serie/20/fixture"
+                "?operator=een&pagina=1&operator=twee",
+                False,
+            ),
+            (
+                f"https://schatkamer.beeldengeluid.nl/lijst/{shared_id}"
+                "?eigenaar=operator&pagina=99&sortering=oudste",
+                f"https://schatkamer.beeldengeluid.nl/lijst/{shared_id}"
+                "?eigenaar=operator&pagina=1&sortering=oudste",
+                True,
+            ),
+            (
+                "https://schatkamer.beeldengeluid.nl/zoeken"
+                "?term=strip%20cartoon&type=video&pagina=99",
+                "https://schatkamer.beeldengeluid.nl/zoeken"
+                "?term=strip%20cartoon&type=video&pagina=1",
+                False,
+            ),
+        ]
+        for source_url, expected_page, shared in cases:
+            with self.subTest(source_url=source_url):
+                overview = self.beeldengeluid_unavailable_overview(shared)
+                result = self.run_windows_beeldengeluid_media_list(
+                    playlist_url=source_url,
+                    series_page=overview,
+                    list_page=overview,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("fake-curl-url: " + expected_page, result.stderr)
+                self.assertNotIn("pagina=99", result.stderr)
+                self.assertNotIn("unexpected-detail-request", result.stderr)
 
     @unittest.skipUnless(
         shutil.which("deno") or shutil.which("deno.exe"), "deno required"

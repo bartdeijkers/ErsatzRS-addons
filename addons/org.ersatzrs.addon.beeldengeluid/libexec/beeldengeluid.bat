@@ -12,9 +12,9 @@ set "SEEK_POSITION=%~2"
 goto :play_args_ready
 
 :list_args
-if "%~2"=="" goto :usage
 if not "%~3"=="" goto :usage
-set "PLAYLIST_URL=%~2"
+if not "%~2"=="" set "PLAYLIST_URL=%~2"
+if not defined PLAYLIST_URL goto :usage
 goto :list_url_valid
 
 :play_args

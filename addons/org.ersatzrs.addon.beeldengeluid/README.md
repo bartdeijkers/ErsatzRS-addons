@@ -61,6 +61,14 @@ create_playlist: true
 Only public shared lists are supported. Private lists that require a signed-in
 browser session are rejected without replacing the last successful sync.
 
+Series, shared-list, and saved-search imports preserve every supplied query
+parameter while replacing only Schatkamer's `pagina` parameter during
+pagination. A series URL with `alleenafspeelbaar=nee` therefore retains
+non-playable episodes in provider order as `unavailable` / `not_playable`.
+Their overview metadata is kept without requesting an unavailable episode's
+detail page, so ErsatzRS can publish the row after a Local replacement is
+selected.
+
 The add-on list manager also accepts saved-search links such as
 `https://schatkamer.beeldengeluid.nl/zoeken?collectie=<name>`. It preserves the
 search term, sorting, media type, date, broadcaster, collection, genre, person,

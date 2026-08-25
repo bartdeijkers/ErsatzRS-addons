@@ -224,7 +224,7 @@ try {
             $availability = if ($availabilityByPath.ContainsKey($path)) {
                 $availabilityByPath[$path]
             } else { 'available' }
-            if ($availability -eq 'unavailable') {
+            if ($availability -eq 'unavailable' -or ($mediaListMode -and -not $isVideo)) {
                 $segments = $path.Trim('/').Split('/')
                 $slug = if ($segments.Count -ge 3) {
                     [Uri]::UnescapeDataString($segments[$segments.Count - 3]).Replace('-', ' ').Replace('_', ' ')
@@ -255,9 +255,12 @@ try {
                         kind = 'remote_stream'
                         guids = @('beeldengeluid://' + $episodeId)
                         source_url = $episodeUrl
-                        availability = 'unavailable'
-                        availability_reason = 'not_playable'
+                        availability = $availability
                         content_kind = 'auto'
+                        liveness = 'finite'
+                    }
+                    if ($availability -eq 'unavailable') {
+                        $item.availability_reason = 'not_playable'
                     }
                     if ($releaseDate) { $item.year = [int]$releaseDate.Substring(0, 4) }
                     if ($episodeImage) {

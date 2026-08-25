@@ -409,7 +409,9 @@ list_playlist() {
             availability=unavailable
             availability_reason=not_playable
         fi
-        if [ "$availability" = unavailable ]; then
+        if [ "$availability" = unavailable ] || {
+            [ "$output_mode" = media-list ] && [ "$source_kind" != video ]
+        }; then
             overview_title_json=$(awk -F '\t' -v path="$episode_path" \
                 '$1 == path { print $3; exit }' "$list_work_dir/overview-items.tsv")
             overview_description_json=$(awk -F '\t' -v path="$episode_path" \
@@ -442,9 +444,12 @@ list_playlist() {
                     ;;
             esac
             if [ "$output_mode" = media-list ]; then
-                printf '{"record_type":"item","provider_id":"episode:%s","rank":%s,"display_title":%s,"title":%s,"kind":"remote_stream","guids":["beeldengeluid://%s"],"source_url":"%s","availability":"unavailable","availability_reason":"not_playable","content_kind":"auto"' \
+                printf '{"record_type":"item","provider_id":"episode:%s","rank":%s,"display_title":%s,"title":%s,"kind":"remote_stream","guids":["beeldengeluid://%s"],"source_url":"%s","availability":"%s","content_kind":"auto","liveness":"finite"' \
                     "$episode_id" "$rank" "$overview_title_json" "$overview_title_json" \
-                    "$episode_id" "$episode_url" >>"$list_work_dir/media-list.ndjson"
+                    "$episode_id" "$episode_url" "$availability" >>"$list_work_dir/media-list.ndjson"
+                [ -z "$availability_reason" ] \
+                    || printf ',"availability_reason":"%s"' "$availability_reason" \
+                        >>"$list_work_dir/media-list.ndjson"
                 [ -z "$year" ] || printf ',"year":%s' "$year" >>"$list_work_dir/media-list.ndjson"
                 [ -z "$episode_image" ] || printf ',"thumbnail_url":%s,"additional_image_urls":[%s]' \
                     "$overview_image_json" "$overview_image_json" >>"$list_work_dir/media-list.ndjson"

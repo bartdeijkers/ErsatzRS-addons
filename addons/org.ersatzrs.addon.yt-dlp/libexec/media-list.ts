@@ -245,8 +245,9 @@ console.log(JSON.stringify({
   },
 }));
 
+const entries = Array.isArray(playlist.entries) ? playlist.entries : [playlist];
 let rank = 0;
-for (const entry of playlist.entries ?? []) {
+for (const entry of entries) {
   const id = text(entry.id);
   const title = text(entry.title);
   const stableUrl = text(entry.webpage_url) ?? text(entry.original_url);
@@ -276,4 +277,7 @@ for (const entry of playlist.entries ?? []) {
   if (state === "unavailable") row.availability_reason = "not_playable";
   console.log(JSON.stringify(row));
   rank++;
+}
+if (rank === 0) {
+  throw new Error("yt-dlp returned no valid media items");
 }

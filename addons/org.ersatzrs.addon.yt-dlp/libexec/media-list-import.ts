@@ -321,9 +321,17 @@ async function discover(request: DiscoverRequest): Promise<void> {
     throw new Error(result.stderr.trim() || "yt-dlp discovery failed");
   }
   const playlist = parseProviderJson(result);
-  const entries = (Array.isArray(playlist.entries) ? playlist.entries : [])
-    .map(object).filter(Boolean) as JsonObject[];
+  const entries =
+    (Array.isArray(playlist.entries) ? playlist.entries : [playlist])
+      .map(object).filter(Boolean) as JsonObject[];
   const selected = entries.slice(0, maxItems);
+  const listTitle = text(playlist.title) ?? "yt-dlp playlist";
+  const rows = selected.map((entry, index) =>
+    providerItem(entry, offset + index, listTitle)
+  ).filter(Boolean) as JsonObject[];
+  if (offset === 0 && rows.length === 0) {
+    throw new Error("yt-dlp returned no valid media items");
+  }
   const complete = entries.length <= maxItems;
   const totalHint = positiveInteger(playlist.playlist_count) ??
     positiveInteger(playlist.n_entries);
@@ -333,7 +341,6 @@ async function discover(request: DiscoverRequest): Promise<void> {
     next_cursor: complete ? undefined : String(offset + selected.length),
     total_hint: totalHint && totalHint <= 10_000 ? totalHint : undefined,
   });
-  const listTitle = text(playlist.title) ?? "yt-dlp playlist";
   if (offset === 0) {
     const listPlot = text(playlist.description) ??
       "Remote videos selected by the supplied playlist link.";
@@ -355,10 +362,7 @@ async function discover(request: DiscoverRequest): Promise<void> {
       },
     });
   }
-  selected.forEach((entry, index) => {
-    const row = providerItem(entry, offset + index, listTitle);
-    if (row) emit(row);
-  });
+  rows.forEach(emit);
 }
 
 function unavailableItem(request: EnrichRequest): JsonObject {

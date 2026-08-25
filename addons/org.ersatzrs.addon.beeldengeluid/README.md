@@ -63,11 +63,13 @@ browser session are rejected without replacing the last successful sync.
 
 Series, shared-list, and saved-search imports preserve every supplied query
 parameter while replacing only Schatkamer's `pagina` parameter during
-pagination. A series URL with `alleenafspeelbaar=nee` therefore retains
-non-playable episodes in provider order as `unavailable` / `not_playable`.
-Their overview metadata is kept without requesting an unavailable episode's
-detail page, so ErsatzRS can publish the row after a Local replacement is
-selected.
+pagination. Aggregate discovery uses the provider's overview metadata without
+requesting each episode detail page, deduplicates overlapping pages by episode
+identity, and retains the first provider position. A series URL with
+`alleenafspeelbaar=nee` therefore retains non-playable episodes in provider
+order as `unavailable` / `not_playable`, so ErsatzRS can publish the row after a
+Local replacement is selected. Direct episode discovery still requests that
+episode page and returns its detail metadata and provider availability.
 
 The add-on list manager also accepts saved-search links such as
 `https://schatkamer.beeldengeluid.nl/zoeken?collectie=<name>`. It preserves the

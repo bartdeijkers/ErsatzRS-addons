@@ -1,6 +1,6 @@
 # yt-dlp Remote Streams add-on
 
-This add-on resolves and plays a finite remote video through an
+This add-on resolves and plays a remote video through an
 operator-installed yt-dlp. Always download or update to the
 [latest official yt-dlp release](https://github.com/yt-dlp/yt-dlp/releases/latest)
 before configuring the add-on. ErsatzRS supplies its managed FFmpeg runtime;
@@ -30,11 +30,14 @@ directory added to its own `PATH`.
 Video is streamed straight through ErsatzRS for immediate playback; no
 permanent file is written.
 
-The add-on can enumerate public playlists through **Media Sources > Add-on
-Lists**. When enabled, ErsatzRS creates a managed local source named `yt-dlp`
-under `<ErsatzRS profile>/yt-dlp_media` by default. Each imported playlist gets
-its own subfolder and Remote Streams library containing generated definitions;
-the storage path is configurable and no video is downloaded permanently.
+The add-on can enumerate public playlists and individual public video links
+through **Media Sources > Add-on Lists**. A direct video becomes a one-item
+list, with live and finite state retained from yt-dlp; playlist entries retain
+their provider order. When enabled, ErsatzRS creates a managed local source
+named `yt-dlp` under `<ErsatzRS profile>/yt-dlp_media` by default. Each imported
+link gets its own subfolder and Remote Streams library containing generated
+definitions; the storage path is configurable and no video is downloaded
+permanently.
 
 Configure the yt-dlp executable under **Settings > Add-ons**, run **Check**,
 then enable the add-on. A Remote Stream definition selects it by identity:

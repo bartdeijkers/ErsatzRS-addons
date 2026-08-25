@@ -12,10 +12,10 @@ The repository contains:
   Stream and media-list paths do not require Python or yt-dlp; a shared Deno
   adapter normalizes provider data for both Windows and POSIX entrypoints.
 - `org.ersatzrs.addon.yt-dlp`: streams a remote video through an
-  operator-installed yt-dlp and the ErsatzRS-managed FFmpeg runtime. It also
-  requires an operator-installed deno, the JavaScript runtime yt-dlp enables by
-  default; readiness reports its absence because playback cannot succeed
-  without it.
+  operator-installed yt-dlp and the ErsatzRS-managed FFmpeg runtime, and imports
+  public playlists or individual videos as add-on lists. It also requires an
+  operator-installed deno, the JavaScript runtime yt-dlp enables by default;
+  readiness reports its absence because playback cannot succeed without it.
 
 The two streaming add-ons send video straight to ErsatzRS for immediate
 playback; no permanent file is written.

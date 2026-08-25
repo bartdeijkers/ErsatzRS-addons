@@ -21,6 +21,7 @@ interface Cursor {
   page: number;
   offset: number;
   rank: number;
+  seen: string[];
 }
 
 interface HttpResult {
@@ -333,26 +334,78 @@ function richerText(
 }
 
 function encodeCursor(cursor: Cursor): string {
-  return btoa(JSON.stringify(cursor)).replaceAll("+", "-").replaceAll("/", "_")
+  const numericIds = [...new Set(cursor.seen)].map((value) => {
+    if (!/^\d{1,64}$/.test(value)) {
+      throw new Error("invalid discovery cursor identity");
+    }
+    return BigInt(value);
+  }).sort((left, right) => left < right ? -1 : left > right ? 1 : 0);
+  let previous = 0n;
+  const seen = numericIds.map((value, index) => {
+    const delta = index === 0 ? value : value - previous;
+    previous = value;
+    return delta.toString(36);
+  }).join(".");
+  const encoded = btoa(JSON.stringify({
+    p: cursor.page,
+    o: cursor.offset,
+    r: cursor.rank,
+    s: seen,
+  })).replaceAll("+", "-").replaceAll("/", "_")
     .replace(/=+$/, "");
+  if (encoded.length > 4_096) {
+    throw new Error("discovery cursor exceeds host limit");
+  }
+  return encoded;
+}
+
+function base36(value: string): bigint {
+  if (!/^[0-9a-z]+$/.test(value)) {
+    throw new Error("invalid base36 cursor value");
+  }
+  let result = 0n;
+  for (const character of value) {
+    const digit = BigInt(parseInt(character, 36));
+    result = result * 36n + digit;
+  }
+  return result;
+}
+
+function expandedSeen(value: string): string[] {
+  if (!value) return [];
+  let previous = 0n;
+  const result = value.split(".").map((part) => {
+    previous += base36(part);
+    return previous.toString();
+  });
+  if (new Set(result).size !== result.length) {
+    throw new Error("duplicate discovery cursor identity");
+  }
+  return result;
 }
 
 function decodeCursor(value?: string): Cursor {
-  if (!value) return { page: 1, offset: 0, rank: 0 };
+  if (!value) return { page: 1, offset: 0, rank: 0, seen: [] };
   try {
     const normalized = value.replaceAll("-", "+").replaceAll("_", "/");
     const decoded = atob(
       normalized + "=".repeat((4 - normalized.length % 4) % 4),
     );
     const cursor = object(JSON.parse(decoded));
-    const page = Number(cursor?.page);
-    const offset = Number(cursor?.offset);
-    const rank = Number(cursor?.rank);
+    const page = Number(cursor?.p ?? cursor?.page);
+    const offset = Number(cursor?.o ?? cursor?.offset);
+    const rank = Number(cursor?.r ?? cursor?.rank);
+    const seen = typeof cursor?.s === "string"
+      ? expandedSeen(cursor.s)
+      : Array.isArray(cursor?.seen)
+      ? cursor.seen
+      : [];
     if (
       [page, offset, rank].every(Number.isSafeInteger) && page >= 1 &&
-      offset >= 0 && rank >= 0
+      offset >= 0 && rank >= 0 && seen.length <= 10_000 &&
+      seen.every((value) => typeof value === "string" && value.length <= 128)
     ) {
-      return { page, offset, rank };
+      return { page, offset, rank, seen: seen as string[] };
     }
   } catch {
     // Report one stable request error below.
@@ -515,18 +568,66 @@ function emit(value: unknown): void {
 
 async function discover(request: DiscoverRequest): Promise<void> {
   const source = new URL(request.source_url);
+  if (
+    source.hostname !== "schatkamer.beeldengeluid.nl" ||
+    !["http:", "https:"].includes(source.protocol)
+  ) {
+    throw new Error("unsupported Schatkamer source URL");
+  }
+  source.protocol = "https:";
+  source.hash = "";
   const cursor = decodeCursor(request.cursor);
   const maxItems = Math.min(Math.max(request.limits.max_items, 1), 250);
   const isEpisode = /\/aflevering\/\d+\/?$/.test(source.pathname);
   if (isEpisode) {
     const path = source.pathname.replace(/\/$/, "");
-    const item: OverviewItem = {
+    const response = await requestPage(source.toString());
+    if (
+      response.error || response.status === 0 || response.status === 429 ||
+      response.status >= 500
+    ) {
+      throw new Error(
+        response.error || `Schatkamer episode returned HTTP ${response.status}`,
+      );
+    }
+    if (response.status >= 400 && ![404, 410].includes(response.status)) {
+      throw new Error(`Schatkamer episode returned HTTP ${response.status}`);
+    }
+    const episodeId = path.split("/").at(-1) ?? "unknown";
+    const normalized = normalizedHtml(response.body);
+    const identityAt = [
+      ...normalized.matchAll(
+        new RegExp(`"id"\\s*:\\s*"${episodeId}"`, "g"),
+      ),
+    ].at(-1)?.index;
+    const playableMatches = [
+      ...normalized.matchAll(/"isPlayable"\s*:\s*(true|false)/gi),
+    ];
+    const playableMatch = identityAt === undefined
+      ? playableMatches.at(-1)
+      : playableMatches.sort((left, right) =>
+        Math.abs((left.index ?? 0) - identityAt) -
+        Math.abs((right.index ?? 0) - identityAt)
+      )[0];
+    const playable = playableMatch?.[1].toLocaleLowerCase() !== "false";
+    const overview: OverviewItem = {
       path,
       title: titleFromPath(path),
+      playable,
     };
+    const baseline = overviewRecord(overview, 0);
+    baseline.source_url = source.toString();
+    const directRequest: EnrichRequest = {
+      source_url: request.source_url,
+      record_capability: request.record_capability,
+      provider_id: `episode:${episodeId}`,
+      overview_fingerprint: "direct-episode",
+      item: baseline,
+    };
+    const unavailable = [404, 410].includes(response.status) || !playable;
     emit({ record_type: "page", complete: true, total_hint: 1 });
-    emit(listHeader(request.source_url, ""));
-    emit(overviewRecord(item, 0));
+    emit(listHeader(request.source_url, response.body));
+    emit(fullItem(directRequest, response.body, unavailable));
     return;
   }
   const response = await requestPage(pageUrl(request.source_url, cursor.page));
@@ -540,17 +641,31 @@ async function discover(request: DiscoverRequest): Promise<void> {
     /\b(\d{1,6})\s+resultaten\b/i,
   );
   const totalHint = totalHintMatch ? Number(totalHintMatch[1]) : undefined;
-  const selected = allItems.slice(cursor.offset, cursor.offset + maxItems);
-  const exhaustedPage = cursor.offset + selected.length >= allItems.length;
+  const seen = new Set(cursor.seen);
+  const selected: OverviewItem[] = [];
+  let nextOffset = cursor.offset;
+  while (nextOffset < allItems.length && selected.length < maxItems) {
+    const item = allItems[nextOffset];
+    nextOffset++;
+    const episodeId = item.path.split("/").at(-1);
+    if (!episodeId || seen.has(episodeId)) continue;
+    seen.add(episodeId);
+    selected.push(item);
+  }
+  const exhaustedPage = nextOffset >= allItems.length;
   const complete = allItems.length === 0;
-  const next = complete
-    ? undefined
-    : exhaustedPage
-    ? { page: cursor.page + 1, offset: 0, rank: cursor.rank + selected.length }
+  const next = complete ? undefined : exhaustedPage
+    ? {
+      page: cursor.page + 1,
+      offset: 0,
+      rank: cursor.rank + selected.length,
+      seen: [...seen],
+    }
     : {
       page: cursor.page,
-      offset: cursor.offset + selected.length,
+      offset: nextOffset,
       rank: cursor.rank + selected.length,
+      seen: [...seen],
     };
   emit({
     record_type: "page",

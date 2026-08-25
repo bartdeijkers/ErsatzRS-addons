@@ -7,10 +7,36 @@ import shlex
 import shutil
 import subprocess
 import tempfile
-import tomllib
 import unittest
 
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python 3.10 in the pinned Linux validation image.
+    import tomli as tomllib
+
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+
+YT_DLP_LIVE_URL = "https://www.youtube.com/watch?v=mhJRzQsLZGg"
+YT_DLP_FINITE_URL = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+YT_DLP_PLAYLIST_URL = (
+    "https://www.youtube.com/playlist?list=PLJ_TJFLc25JRdChhr9sp00ajl7FAeKDx-"
+)
+BEELDENGELUID_LIST_URL = (
+    "https://schatkamer.beeldengeluid.nl/lijst/"
+    "14df8d33-ce8a-4680-a83b-0cc2a9c58bcd"
+)
+BEELDENGELUID_SEARCH_URL = (
+    "https://schatkamer.beeldengeluid.nl/zoeken?q=reclame&startdatum=01-01-1995"
+    "&einddatum=01-03-1995"
+)
+BEELDENGELUID_SERIES_URL = (
+    "https://schatkamer.beeldengeluid.nl/serie/2101608030022669331/"
+    "de-fascinaties-van-boudewijn-buch"
+)
+BEELDENGELUID_EPISODE_URL = (
+    "https://schatkamer.beeldengeluid.nl/serie/2101608030021828731/"
+    "ster-reclame/aflevering/2101608040033953431"
+)
 
 class RepositoryTests(unittest.TestCase):
     def final_operation_error(self, result: subprocess.CompletedProcess[str]) -> dict[str, str]:
@@ -816,12 +842,13 @@ exit 0
         rows = [json.loads(line) for line in result.stdout.splitlines()]
         self.assertEqual(rows[0]["name"], "Fixture Programme")
         self.assertEqual(rows[0]["description"], "Full editorial introduction")
-        self.assertEqual(rows[1]["duration_seconds"], 120)
-        self.assertEqual(rows[1]["metadata"]["release_date"], "1993-01-24")
+        self.assertNotIn("duration_seconds", rows[1])
+        self.assertNotIn("release_date", rows[1]["metadata"])
         self.assertEqual(
             rows[1]["additional_image_urls"],
             ["https://sk-video.cdn.beeldengeluid.nl/fixture/still.jpg"],
         )
+        self.assertNotIn("/aflevering/201", result.stderr)
 
     @unittest.skipUnless(
         (shutil.which("deno") or shutil.which("deno.exe"))
@@ -959,9 +986,11 @@ exit 0
         self.assertEqual(rows[0]["name"], "Beeld & Geluid Schatkamer")
         self.assertEqual([row["provider_id"] for row in rows[1:]], ["episode:201", "episode:203"])
         self.assertEqual([row["rank"] for row in rows[1:]], [0, 1])
-        self.assertEqual([row["year"] for row in rows[1:]], [1993, 1993])
+        self.assertTrue(all("year" not in row for row in rows[1:]))
         self.assertTrue(all(row["kind"] == "remote_stream" for row in rows[1:]))
+        self.assertTrue(all(row["liveness"] == "finite" for row in rows[1:]))
         self.assertTrue(all(row["source_url"].startswith("https://") for row in rows[1:]))
+        self.assertNotIn("/aflevering/", result.stderr)
 
     def test_yt_dlp_declares_file_backed_list_storage(self) -> None:
         manifest = tomllib.loads(
@@ -1278,7 +1307,9 @@ printf '%s\n' '{"title":"Fixture playlist","description":"Fixture list descripti
         os.name == "nt" and (shutil.which("powershell.exe") or shutil.which("pwsh")),
         "native Windows PowerShell required",
     )
-    def test_windows_beeldengeluid_keeps_single_metadata_values_as_arrays(self) -> None:
+    def test_windows_beeldengeluid_keeps_aggregate_metadata_arrays_without_details(
+        self,
+    ) -> None:
         result = self.run_windows_beeldengeluid_media_list()
         self.assertEqual(result.returncode, 0, result.stderr)
         rows = [json.loads(line) for line in result.stdout.splitlines()]
@@ -1292,8 +1323,8 @@ printf '%s\n' '{"title":"Fixture playlist","description":"Fixture list descripti
                 }
             ],
         )
-        self.assertEqual(rows[1]["metadata"]["content_ratings"], ["nl:AL"])
-        self.assertEqual(rows[1]["metadata"]["release_date"], "1993-01-24")
+        self.assertEqual(rows[1]["metadata"]["content_ratings"], [])
+        self.assertNotIn("release_date", rows[1]["metadata"])
         self.assertEqual(
             rows[1]["metadata"]["artwork"],
             [
@@ -1303,10 +1334,8 @@ printf '%s\n' '{"title":"Fixture playlist","description":"Fixture list descripti
                 }
             ],
         )
-        self.assertEqual(
-            rows[1]["metadata"]["people"],
-            [{"name": "Presenter One", "role": "presenter"}],
-        )
+        self.assertEqual(rows[1]["metadata"]["people"], [])
+        self.assertNotIn("/aflevering/201", result.stderr)
 
     @unittest.skipUnless(
         shutil.which("deno") or shutil.which("deno.exe"), "deno required"
@@ -1792,6 +1821,434 @@ printf '%s\n' '{"title":"Fixture playlist","description":"Fixture list descripti
         self.assertIn('"liveness":%(ersatzrs_liveness)j', posix_source)
         self.assertIn('"is_live":%(ersatzrs_live_flag)s', posix_source)
         self.assertIn("liveness = $liveness", powershell_source)
+
+    @unittest.skipUnless(
+        shutil.which("deno") or shutil.which("deno.exe"), "deno required"
+    )
+    def test_amm_g07_yt_dlp_exact_urls_across_native_import_transports(self) -> None:
+        addon_root = ROOT / "addons" / "org.ersatzrs.addon.yt-dlp"
+        cases = [
+            (
+                YT_DLP_LIVE_URL,
+                {
+                    "id": "mhJRzQsLZGg",
+                    "title": "AMM-G07 live video",
+                    "webpage_url": YT_DLP_LIVE_URL,
+                    "availability": "public",
+                    "live_status": "is_live",
+                    "is_live": True,
+                },
+                ["mhJRzQsLZGg"],
+                ["live"],
+            ),
+            (
+                YT_DLP_FINITE_URL,
+                {
+                    "id": "dQw4w9WgXcQ",
+                    "title": "AMM-G07 finite video",
+                    "webpage_url": YT_DLP_FINITE_URL,
+                    "availability": "public",
+                    "live_status": "not_live",
+                    "is_live": False,
+                    "duration": 213,
+                },
+                ["dQw4w9WgXcQ"],
+                ["finite"],
+            ),
+            (
+                YT_DLP_PLAYLIST_URL,
+                {
+                    "id": "PLJ_TJFLc25JRdChhr9sp00ajl7FAeKDx-",
+                    "title": "AMM-G07 ordered playlist",
+                    "entries": [
+                        {
+                            "id": "playlist-first",
+                            "title": "First",
+                            "webpage_url": "https://www.youtube.com/watch?v=playlist-first",
+                            "availability": "public",
+                            "live_status": "not_live",
+                        },
+                        {
+                            "id": "playlist-second",
+                            "title": "Second",
+                            "webpage_url": "https://www.youtube.com/watch?v=playlist-second",
+                            "availability": "public",
+                            "live_status": "is_live",
+                        },
+                        {
+                            "id": "playlist-third",
+                            "title": "Third",
+                            "webpage_url": "https://www.youtube.com/watch?v=playlist-third",
+                            "availability": "public",
+                            "live_status": "post_live",
+                        },
+                    ],
+                },
+                ["playlist-first", "playlist-second", "playlist-third"],
+                ["finite", "live", "finite"],
+            ),
+            (
+                "https://www.youtube.com/watch?v=invalid-output",
+                {"title": "Invalid provider root"},
+                [],
+                [],
+            ),
+        ]
+        for source_url, payload, expected_ids, expected_liveness in cases:
+            for resumable in [True, False]:
+                with self.subTest(source_url=source_url, resumable=resumable):
+                    with tempfile.TemporaryDirectory() as temporary:
+                        fixtures = pathlib.Path(temporary)
+                        fixture = fixtures / "provider.json"
+                        fixture.write_text(json.dumps(payload), encoding="utf-8")
+                        calls = fixtures / "calls.txt"
+                        if os.name == "nt":
+                            fake = fixtures / "fake-yt-dlp.cmd"
+                            fake.write_text(
+                                '@echo off\n>>"%FAKE_CALLS%" echo %*\n'
+                                'type "%FAKE_FIXTURE%"\n',
+                                encoding="utf-8",
+                            )
+                            command = [
+                                os.environ.get("COMSPEC", "cmd.exe"),
+                                "/d",
+                                "/c",
+                                str(addon_root / "addon.bat"),
+                            ]
+                        else:
+                            fake = fixtures / "fake-yt-dlp"
+                            fake.write_text(
+                                '#!/bin/sh\nprintf \'%s\\n\' "$*" >> "$FAKE_CALLS"\n'
+                                'cat "$FAKE_FIXTURE"\n',
+                                encoding="utf-8",
+                            )
+                            fake.chmod(0o755)
+                            command = ["/bin/sh", str(addon_root / "addon.sh")]
+                        environment = os.environ.copy()
+                        environment.update(
+                            {
+                                "YT_DLP_BIN": str(fake),
+                                "ERSATZRS_ADDON_SETTING_YT_DLP_BIN": str(fake),
+                                "FAKE_CALLS": str(calls),
+                                "FAKE_FIXTURE": str(fixture),
+                            }
+                        )
+                        if resumable:
+                            request = {
+                                "source_url": source_url,
+                                "record_capability": "media-list.list.v5",
+                                "limits": {
+                                    "max_items": 250,
+                                    "max_output_bytes": 4_194_304,
+                                },
+                            }
+                            result = subprocess.run(
+                                [*command, "discover"],
+                                input=json.dumps(request),
+                                check=False,
+                                capture_output=True,
+                                text=True,
+                                env=environment,
+                            )
+                        else:
+                            environment["ERSATZRS_MEDIA_LIST_URL"] = source_url
+                            result = subprocess.run(
+                                [*command, "list"],
+                                check=False,
+                                capture_output=True,
+                                text=True,
+                                env=environment,
+                            )
+                        if not expected_ids:
+                            self.assertNotEqual(result.returncode, 0)
+                            self.assertIn("no valid media items", result.stderr)
+                            continue
+                        self.assertEqual(result.returncode, 0, result.stderr)
+                        rows = [json.loads(line) for line in result.stdout.splitlines()]
+                        items = [
+                            row for row in rows if row.get("record_type") == "item"
+                        ]
+                        self.assertEqual(
+                            [row["provider_id"] for row in items], expected_ids
+                        )
+                        self.assertEqual(
+                            [row["liveness"] for row in items], expected_liveness
+                        )
+                        self.assertEqual(
+                            [row["rank"] for row in items], list(range(len(items)))
+                        )
+                        call_log = calls.read_text(encoding="utf-8").splitlines()
+                        self.assertEqual(len(call_log), 1)
+                        self.assertIn(source_url, call_log[0])
+                        if resumable:
+                            self.assertIn("--flat-playlist", call_log[0])
+
+    @unittest.skipUnless(
+        shutil.which("deno") or shutil.which("deno.exe"), "deno required"
+    )
+    def test_amm_g07_beeldengeluid_exact_urls_across_native_import_transports(
+        self,
+    ) -> None:
+        addon_root = ROOT / "addons" / "org.ersatzrs.addon.beeldengeluid"
+        episode_ids = [
+            "2101608040033953431",
+            "2101608040033953432",
+            "2101608040033953433",
+        ]
+
+        def overview(ids: list[str], shared: bool = False) -> str:
+            header = (
+                r'<script>\"title\":\"AMM-G07 frozen list\",'
+                r'\"description\":\"Gedeelde lijst\"</script>'
+                if shared
+                else '<script type="application/ld+json">'
+                '{"@type":"CreativeWorkSeries","name":"AMM-G07 frozen series",'
+                '"description":"Frozen aggregate overview"}</script>'
+            )
+            cards = []
+            for index, episode_id in enumerate(ids):
+                path = (
+                    "/serie/2101608030021828731/ster-reclame/aflevering/"
+                    + episode_id
+                )
+                cards.append(
+                    f'<li><a data-title="Frozen item {episode_id}" href="{path}">'
+                    f'<h3>Frozen item {episode_id}</h3></a>'
+                    f'<p>Overview plot {episode_id}</p></li>'
+                    '<script>{"url":"https://schatkamer.beeldengeluid.nl'
+                    f'{path}","isPlayable":true,"title":"Provider title {episode_id}",'
+                    f'"publishedAtISO":"1995-02-{index + 1:02d}T12:00:00Z"}}</script>'
+                )
+            return header + "".join(cards)
+
+        detail = (
+            '<h1>STER reclame</h1><h3>AMM-G07 direct episode</h3>'
+            r'<script>\"program\":{\"id\":\"2101608040033953431\",'
+            r'\"isPlayable\":false,\"description\":\"Frozen direct plot\",'
+            r'\"disclaimer\":null,\"durationNumber\":87,'
+            r'\"publishedAtISO\":\"1995-02-14T12:00:00Z\",'
+            r'\"ageRating\":\"Alle leeftijden\",\"genres\":[\"Reclame\"],'
+            r'\"subjects\":[\"Commercial\"],\"collection\":null,'
+            r'\"presenters\":[],\"actors\":[],\"guests\":[],'
+            r'\"directors\":[],\"performers\":[],\"others\":[],'
+            r'\"productionCompanies\":[],\"originalBroadcasters\":[],'
+            r'\"broadcaster\":null,\"broadcasters\":[],\"url\":\"fixture\"}'
+            '</script>'
+        )
+
+        with tempfile.TemporaryDirectory() as temporary:
+            fixtures = pathlib.Path(temporary)
+            (fixtures / "page-1.html").write_text(
+                overview(episode_ids[:2], shared=True), encoding="utf-8"
+            )
+            (fixtures / "page-2.html").write_text(
+                overview(episode_ids[1:]), encoding="utf-8"
+            )
+            (fixtures / "empty.html").write_text("<html></html>", encoding="utf-8")
+            (fixtures / "detail.html").write_text(detail, encoding="utf-8")
+            calls = fixtures / "calls.txt"
+
+            if os.name == "nt":
+                project = fixtures / "FrozenCurl.csproj"
+                project.write_text(
+                    '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup>'
+                    '<OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework>'
+                    '<ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable>'
+                    '</PropertyGroup></Project>',
+                    encoding="utf-8",
+                )
+                (fixtures / "Program.cs").write_text(
+                    'var root = Environment.GetEnvironmentVariable("FAKE_FIXTURES")!;\n'
+                    'var calls = Environment.GetEnvironmentVariable("FAKE_CALLS")!;\n'
+                    'var url = args.Last(value => value.StartsWith("http", '
+                    'StringComparison.OrdinalIgnoreCase));\n'
+                    'File.AppendAllText(calls, url + Environment.NewLine);\n'
+                    'var name = url.Contains("/aflevering/") ? "detail.html" : '
+                    'url.Contains("pagina=1") ? "page-1.html" : '
+                    'url.Contains("pagina=2") ? "page-2.html" : "empty.html";\n'
+                    'var content = File.ReadAllText(Path.Combine(root, name));\n'
+                    'var outputAt = Array.IndexOf(args, "--output");\n'
+                    'if (outputAt >= 0) File.WriteAllText(args[outputAt + 1], content);\n'
+                    'else { Console.Write(content); '
+                    'Console.Write("\\n__ERSATZRS_HTTP_STATUS__:200"); }\n',
+                    encoding="utf-8",
+                )
+                output = fixtures / "frozen-curl-bin"
+                compiled = subprocess.run(
+                    [
+                        shutil.which("dotnet") or "dotnet",
+                        "build",
+                        str(project),
+                        "--nologo",
+                        "--configuration",
+                        "Release",
+                        "--output",
+                        str(output),
+                        "-p:RestoreIgnoreFailedSources=true",
+                    ],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    env={
+                        **os.environ,
+                        "DOTNET_CLI_HOME": str(fixtures),
+                        "DOTNET_CLI_TELEMETRY_OPTOUT": "1",
+                        "DOTNET_SKIP_FIRST_TIME_EXPERIENCE": "1",
+                    },
+                )
+                self.assertEqual(compiled.returncode, 0, compiled.stderr)
+                fake = output / "FrozenCurl.exe"
+                command = [
+                    os.environ.get("COMSPEC", "cmd.exe"),
+                    "/d",
+                    "/c",
+                    str(addon_root / "addon.bat"),
+                ]
+            else:
+                fake = fixtures / "frozen-curl"
+                fake.write_text(
+                    """#!/bin/sh
+set -eu
+output=
+url=
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --output) shift; output=$1 ;;
+        http://*|https://*) url=$1 ;;
+    esac
+    shift
+done
+printf '%s\n' "$url" >> "$FAKE_CALLS"
+case "$url" in
+    */aflevering/*) source_file=$FAKE_FIXTURES/detail.html ;;
+    *pagina=1*) source_file=$FAKE_FIXTURES/page-1.html ;;
+    *pagina=2*) source_file=$FAKE_FIXTURES/page-2.html ;;
+    *) source_file=$FAKE_FIXTURES/empty.html ;;
+esac
+if [ -n "$output" ]; then
+    cp "$source_file" "$output"
+else
+    cat "$source_file"
+    printf '\n__ERSATZRS_HTTP_STATUS__:200'
+fi
+""",
+                    encoding="utf-8",
+                )
+                fake.chmod(0o755)
+                command = ["/bin/sh", str(addon_root / "addon.sh")]
+
+            environment = os.environ.copy()
+            environment.update(
+                {
+                    "CURL_BIN": str(fake),
+                    "ERSATZRS_ADDON_SETTING_CURL_BIN": str(fake),
+                    "FAKE_CALLS": str(calls),
+                    "FAKE_FIXTURES": str(fixtures),
+                    "TEMP": str(fixtures),
+                    "TMP": str(fixtures),
+                }
+            )
+            aggregate_urls = [
+                BEELDENGELUID_LIST_URL,
+                BEELDENGELUID_SEARCH_URL,
+                BEELDENGELUID_SERIES_URL,
+            ]
+            for source_url in [*aggregate_urls, BEELDENGELUID_EPISODE_URL]:
+                for resumable in [True, False]:
+                    with self.subTest(source_url=source_url, resumable=resumable):
+                        calls.write_text("", encoding="utf-8")
+                        items: list[dict[str, object]] = []
+                        if resumable:
+                            cursor = None
+                            for _ in range(4):
+                                request = {
+                                    "source_url": source_url,
+                                    "record_capability": "media-list.list.v5",
+                                    "limits": {
+                                        "max_items": 250,
+                                        "max_output_bytes": 4_194_304,
+                                    },
+                                }
+                                if cursor is not None:
+                                    request["cursor"] = cursor
+                                result = subprocess.run(
+                                    [*command, "discover"],
+                                    input=json.dumps(request),
+                                    check=False,
+                                    capture_output=True,
+                                    text=True,
+                                    env=environment,
+                                )
+                                self.assertEqual(result.returncode, 0, result.stderr)
+                                rows = [
+                                    json.loads(line)
+                                    for line in result.stdout.splitlines()
+                                ]
+                                page = rows[0]
+                                items.extend(
+                                    row
+                                    for row in rows
+                                    if row.get("record_type") == "item"
+                                )
+                                if page["complete"]:
+                                    break
+                                cursor = page["next_cursor"]
+                                self.assertLessEqual(len(cursor.encode("utf-8")), 4_096)
+                            else:
+                                self.fail("resumable discovery did not complete")
+                        else:
+                            environment["ERSATZRS_MEDIA_LIST_URL"] = source_url
+                            result = subprocess.run(
+                                [*command, "list"],
+                                check=False,
+                                capture_output=True,
+                                text=True,
+                                env=environment,
+                            )
+                            self.assertEqual(result.returncode, 0, result.stderr)
+                            rows = [
+                                json.loads(line) for line in result.stdout.splitlines()
+                            ]
+                            items = [
+                                row for row in rows if row.get("record_type") == "item"
+                            ]
+
+                        call_log = calls.read_text(encoding="utf-8").splitlines()
+                        if source_url == BEELDENGELUID_EPISODE_URL:
+                            self.assertEqual(call_log, [BEELDENGELUID_EPISODE_URL])
+                            self.assertEqual(len(items), 1)
+                            self.assertIn("AMM-G07 direct episode", items[0]["title"])
+                            if resumable:
+                                self.assertEqual(items[0]["availability"], "unavailable")
+                                self.assertEqual(
+                                    items[0]["availability_reason"], "not_playable"
+                                )
+                                self.assertEqual(items[0]["duration_seconds"], 87)
+                                self.assertEqual(
+                                    items[0]["metadata"]["plot"], "Frozen direct plot"
+                                )
+                            continue
+
+                        self.assertEqual(
+                            [row["provider_id"] for row in items],
+                            [f"episode:{episode_id}" for episode_id in episode_ids],
+                        )
+                        self.assertEqual([row["rank"] for row in items], [0, 1, 2])
+                        self.assertEqual(len(call_log), 3)
+                        self.assertTrue(all("/aflevering/" not in url for url in call_log))
+                        self.assertEqual(sum("pagina=1" in url for url in call_log), 1)
+                        self.assertEqual(sum("pagina=2" in url for url in call_log), 1)
+                        self.assertTrue(any("pagina=3" in url for url in call_log))
+                        if source_url == BEELDENGELUID_SEARCH_URL:
+                            self.assertTrue(
+                                all("q=reclame" in url for url in call_log)
+                            )
+                            self.assertTrue(
+                                all("startdatum=01-01-1995" in url for url in call_log)
+                            )
+                            self.assertTrue(
+                                all("einddatum=01-03-1995" in url for url in call_log)
+                            )
 
 
 if __name__ == "__main__":

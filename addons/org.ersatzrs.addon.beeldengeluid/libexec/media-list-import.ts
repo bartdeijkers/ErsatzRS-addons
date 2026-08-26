@@ -715,6 +715,24 @@ function peopleFromHtml(html: string): JsonObject[] {
   return result.slice(0, 1024);
 }
 
+// A programme that was archived across several analogue carriers publishes one
+// stream entry per part, and the episode runs as long as all of them together.
+// Only entries in that stream index carry a playout position, so pairing the
+// two fields selects the parts and ignores durations published elsewhere on
+// the page. A page without the index keeps its single duration.
+function episodeDuration(html: string): number | undefined {
+  const parts = [
+    ...html.matchAll(
+      /"durationNumber"\s*:\s*(\d+)\s*,\s*"playoutOrder"\s*:\s*\d+/gi,
+    ),
+  ];
+  if (parts.length) {
+    return parts.reduce((total, part) => total + Number(part[1]), 0);
+  }
+  const single = html.match(/"durationNumber"\s*:\s*(\d+)/i);
+  return single ? Number(single[1]) : undefined;
+}
+
 function fullItem(
   request: EnrichRequest,
   html: string,
@@ -732,10 +750,8 @@ function fullItem(
     text(object(baseline.metadata)?.plot);
   const releaseDate = dateFromHtml(normalized) ??
     text(object(baseline.metadata)?.release_date);
-  const durationMatch = normalized.match(/"durationNumber"\s*:\s*(\d+)/i);
-  const duration = durationMatch
-    ? Number(durationMatch[1])
-    : Number(baseline.duration_seconds);
+  const duration = episodeDuration(normalized) ??
+    Number(baseline.duration_seconds);
   const genres = jsonStrings(normalized, "genres");
   const tags = jsonStrings(normalized, "subjects");
   const image = imageFromHtml(normalized) ??

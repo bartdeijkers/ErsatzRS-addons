@@ -1,6 +1,6 @@
 manifest_version = 4
 id = "org.ersatzrs.addon.beeldengeluid"
-version = "0.9.3"
+version = "0.10.0"
 license = "Zlib"
 source_url = "https://github.com/bartdeijkers/ErsatzRS-addons/tree/main/addons/org.ersatzrs.addon.beeldengeluid"
 host_version = ">=0.1.0, <0.2.0"
@@ -89,7 +89,7 @@ kind = "windows_batch"
 network_hosts = ["schatkamer.beeldengeluid.nl", "sk-video.cdn.beeldengeluid.nl"]
 media_read = false
 managed_ffmpeg = true
-external_commands = ["curl", "awk", "grep", "dd", "sed", "mktemp", "powershell.exe", "deno"]
+external_commands = ["curl", "awk", "grep", "sed", "mktemp", "powershell.exe", "deno"]
 
 [[settings]]
 key = "MEDIA_STORAGE_PATH"

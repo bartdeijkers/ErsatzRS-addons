@@ -14,6 +14,18 @@ over a generic broadcaster image from the episode detail page.
 Video is streamed straight through ErsatzRS for immediate playback; no
 permanent file is written.
 
+## Episodes archived in several parts
+
+A programme that was archived across several analogue carriers is published as
+one episode with several streams. The add-on treats them as one continuous
+programme: the reported duration is the sum of every part, and playback emits
+the parts back to back in the provider's playout order as one MPEG-TS timeline.
+A seek position and a chapter fragment both address that concatenated timeline,
+so they select the part that actually contains the requested moment instead of
+being applied to every part. Parts that end before the requested position are
+skipped, and each part's output timestamps are offset by everything already
+emitted so the timeline never steps backwards at a part boundary.
+
 When enabled, ErsatzRS creates a managed local source named `beeldengeluid`.
 Its default root is `<ErsatzRS profile>/beeldengeluid_media`; the path can be
 changed under **Settings > Add-ons**. Every link added through **Media Sources

@@ -9,6 +9,26 @@ function JsonSlice([string]$html, [string]$start, [string]$end) {
     return $matches[$matches.Count - 1].Groups[1].Value
 }
 
+# A programme that was archived across several analogue carriers publishes one
+# stream entry per part, and the episode runs as long as all of them together.
+# Only entries in that stream index carry a playout position, so pairing the
+# two fields selects the parts and ignores durations published elsewhere on the
+# page. A page without the index keeps its single duration.
+function EpisodeDurationSeconds([string]$html) {
+    $parts = [regex]::Matches(
+        $html,
+        '\\\x22durationNumber\\\x22:(\d+),\\\x22playoutOrder\\\x22:\d+'
+    )
+    if ($parts.Count) {
+        $total = [int64]0
+        foreach ($part in $parts) { $total += [int64]$part.Groups[1].Value }
+        return $total
+    }
+    $single = [regex]::Match($html, '\\\x22durationNumber\\\x22:(\d+)')
+    if ($single.Success) { return [int64]$single.Groups[1].Value }
+    return $null
+}
+
 function JsonObjectNames([string]$html, [string]$start, [string]$end) {
     $slice = JsonSlice $html $start $end
     if (-not $slice) { return @() }
@@ -319,7 +339,7 @@ try {
             $title = [Net.WebUtility]::HtmlDecode($title)
             if ($series) { $title = $series + ' - ' + $title }
 
-            $duration = [regex]::Match($programHtml, '\\\x22durationNumber\\\x22:(\d+)')
+            $duration = EpisodeDurationSeconds $programHtml
             $imageMatch = [regex]::Match(
                 $html.Replace('\"', '"'),
                 '"image":"(https://schatkamer[.]beeldengeluid[.]nl/[^"]+)"'
@@ -391,7 +411,7 @@ try {
             }
             if ($availability -eq 'unavailable') { $row.availability_reason = 'not_playable' }
             if ($series) { $row.show_title = $series }
-            if ($duration.Success) { $row.duration_seconds = [int64]$duration.Groups[1].Value }
+            if ($null -ne $duration) { $row.duration_seconds = $duration }
             if ($episodeImage) {
                 $row.thumbnail_url = $episodeImage
                 $row.additional_image_urls = @($episodeImage)
@@ -452,7 +472,7 @@ try {
                 }
                 if ($availability -eq 'unavailable') { $item.availability_reason = 'not_playable' }
                 if ($releaseDate) { $item.year = [int]$releaseDate.Substring(0, 4) }
-                if ($duration.Success) { $item.duration_seconds = [int64]$duration.Groups[1].Value }
+                if ($null -ne $duration) { $item.duration_seconds = $duration }
                 if ($episodeImage) { $item.additional_image_urls = @($episodeImage) }
                 $item.metadata = [ordered]@{
                     title = $title

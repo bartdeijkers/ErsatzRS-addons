@@ -62,8 +62,15 @@ if errorlevel 1 (
     >&2 echo beeldengeluid.bat: the seek timestamp is invalid
     exit /b 64
 )
-for /f "usebackq tokens=1,* delims==" %%A in (`powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%~dp0beeldengeluid-fragment.ps1"`) do set "%%A=%%B"
-if errorlevel 1 exit /b 64
+call :require_program "deno.exe" Deno
+if errorlevel 1 exit /b 69
+rem Chapter bounds stay on the episode URL for the plan module; only the page
+rem and Server Action requests need them removed.
+for /f "usebackq delims=" %%A in (`powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "([Uri]$env:EPISODE_URL).GetLeftPart([UriPartial]::Path)"`) do set "EPISODE_PAGE_URL=%%A"
+if not defined EPISODE_PAGE_URL (
+    >&2 echo beeldengeluid.bat: the Schatkamer episode URL is invalid
+    exit /b 64
+)
 
 set "WORK_ID=%RANDOM%-%RANDOM%"
 set "PAYLOAD_FILE=%TEMP%\ersatzrs-beeldengeluid-%WORK_ID%-payload.json"
@@ -72,7 +79,7 @@ set "ACTION_FILE=%TEMP%\ersatzrs-beeldengeluid-%WORK_ID%-action.txt"
 set "COOKIE_FILE=%TEMP%\ersatzrs-beeldengeluid-%WORK_ID%-cookies.txt"
 set "CHUNK_FILE=%TEMP%\ersatzrs-beeldengeluid-%WORK_ID%-chunk.js"
 set "RSC_FILE=%TEMP%\ersatzrs-beeldengeluid-%WORK_ID%-response.rsc"
-set "STREAMS_FILE=%TEMP%\ersatzrs-beeldengeluid-%WORK_ID%-streams.txt"
+set "PLAN_FILE=%TEMP%\ersatzrs-beeldengeluid-%WORK_ID%-plan.tsv"
 
 "%CURL_BIN%" --fail --silent --show-error --location --max-redirs 5 --proto "=https" --proto-redir "=https" --retry 2 --connect-timeout 10 --max-time 45 --cookie-jar "%COOKIE_FILE%" --output "%PAGE_FILE%" "%EPISODE_PAGE_URL%"
 if errorlevel 1 (
@@ -139,52 +146,33 @@ if errorlevel 1 (
     goto :failed
 )
 
-rem Parse exact-length RSC T-chunks and convert the three signed query
-rem parameters to a tab-separated base-URL/cookie record for each stream.
-powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ^
-    "$ErrorActionPreference = 'Stop';" ^
-    "$data = [IO.File]::ReadAllText($env:RSC_FILE);" ^
-    "$records = @();" ^
-    "foreach ($match in [regex]::Matches($data, '(\d+):T([0-9a-fA-F]+),')) {" ^
-    "  $size = [Convert]::ToInt32($match.Groups[2].Value, 16);" ^
-    "  $start = $match.Index + $match.Length;" ^
-    "  if ($start + $size -gt $data.Length) { continue };" ^
-    "  $raw = $data.Substring($start, $size).Trim().Replace('\u0026', '&');" ^
-    "  if ($raw -notlike '*sk-video.cdn.beeldengeluid.nl*.m3u8*') { continue };" ^
-    "  $uri = [Uri]$raw;" ^
-    "  if ($uri.Scheme -ne 'https' -or $uri.Host -ne 'sk-video.cdn.beeldengeluid.nl' -or -not $uri.AbsolutePath.EndsWith('.m3u8')) { throw 'Unexpected stream URL' };" ^
-    "  $parameters = @{};" ^
-    "  foreach ($pair in $uri.Query.TrimStart('?').Split('&')) {" ^
-    "    $separator = $pair.IndexOf('=');" ^
-    "    if ($separator -lt 0) { continue };" ^
-    "    $name = [Uri]::UnescapeDataString($pair.Substring(0, $separator));" ^
-    "    $value = [Uri]::UnescapeDataString($pair.Substring($separator + 1).Replace('+', ' '));" ^
-    "    $parameters[$name] = $value" ^
-    "  };" ^
-    "  foreach ($name in @('CloudFront-Policy', 'CloudFront-Signature', 'CloudFront-Key-Pair-Id')) { if (-not $parameters.ContainsKey($name)) { throw ('Missing ' + $name) } };" ^
-    "  $baseUrl = $uri.GetLeftPart([UriPartial]::Path);" ^
-    "  $cookie = 'CloudFront-Policy=' + $parameters['CloudFront-Policy'] + '; CloudFront-Signature=' + $parameters['CloudFront-Signature'] + '; CloudFront-Key-Pair-Id=' + $parameters['CloudFront-Key-Pair-Id'];" ^
-    "  $records += $baseUrl + [char]9 + $cookie" ^
-    "};" ^
-    "if ($records.Count -eq 0) { throw 'No signed HLS stream URL was found' };" ^
-    "[IO.File]::WriteAllLines($env:STREAMS_FILE, [string[]]$records, [Text.Encoding]::ASCII)"
-if errorlevel 1 (
-    >&2 echo beeldengeluid.bat: no usable signed HLS stream was found
-    goto :failed
+rem One Schatkamer episode can be archived across several carriers. The shared
+rem plan module orders them, maps the seek position and any chapter bounds onto
+rem the concatenated timeline, and reports what each part has to contribute.
+deno.exe run --quiet --allow-read="%RSC_FILE%" --allow-env=EPISODE_URL,SEEK_POSITION "%~dp0stream-plan.ts" "%RSC_FILE%" >"%PLAN_FILE%"
+set "PLAN_STATUS=%ERRORLEVEL%"
+if not "%PLAN_STATUS%"=="0" (
+    rem Keep the plan module's own status; it separates a rejected definition
+    rem from an unusable provider response.
+    call :cleanup
+    exit /b %PLAN_STATUS%
 )
 
-set "STREAM_COUNT=0"
-for /f "usebackq tokens=1,* delims=	" %%A in ("%STREAMS_FILE%") do (
-    set /a STREAM_COUNT+=1 >nul
-    if defined FRAGMENT_DURATION (
-        "%FFMPEG_BIN%" -nostdin -hide_banner -loglevel error -ss "%SEEK_POSITION%" -headers "Cookie: %%B" -i "%%A" -t "%FRAGMENT_DURATION%" -map 0:v:0? -map 0:a:0? -c copy -f mpegts pipe:1
+set "PART_COUNT=0"
+for /f "usebackq tokens=1-5 delims=	" %%A in ("%PLAN_FILE%") do (
+    set /a PART_COUNT+=1 >nul
+    rem %%E offsets this part's output timeline. Each part is a separate
+    rem FFmpeg run that restarts at zero, so without an offset the
+    rem concatenated stdout timeline steps backwards at every boundary.
+    if "%%D"=="-" (
+        "%FFMPEG_BIN%" -nostdin -hide_banner -loglevel error -ss "%%C" -headers "Cookie: %%B" -i "%%A" -map 0:v:0? -map 0:a:0? -c copy -output_ts_offset "%%E" -f mpegts pipe:1
     ) else (
-        "%FFMPEG_BIN%" -nostdin -hide_banner -loglevel error -ss "%SEEK_POSITION%" -headers "Cookie: %%B" -i "%%A" -map 0:v:0? -map 0:a:0? -c copy -f mpegts pipe:1
+        "%FFMPEG_BIN%" -nostdin -hide_banner -loglevel error -ss "%%C" -headers "Cookie: %%B" -i "%%A" -t "%%D" -map 0:v:0? -map 0:a:0? -c copy -output_ts_offset "%%E" -f mpegts pipe:1
     )
     if errorlevel 1 goto :ffmpeg_failed
 )
 
-if "%STREAM_COUNT%"=="0" (
+if "%PART_COUNT%"=="0" (
     >&2 echo beeldengeluid.bat: no signed HLS stream URL was found
     goto :failed
 )
@@ -206,7 +194,7 @@ if defined ACTION_FILE del /q "%ACTION_FILE%" >nul 2>&1
 if defined COOKIE_FILE del /q "%COOKIE_FILE%" >nul 2>&1
 if defined CHUNK_FILE del /q "%CHUNK_FILE%" >nul 2>&1
 if defined RSC_FILE del /q "%RSC_FILE%" >nul 2>&1
-if defined STREAMS_FILE del /q "%STREAMS_FILE%" >nul 2>&1
+if defined PLAN_FILE del /q "%PLAN_FILE%" >nul 2>&1
 exit /b 0
 
 :require_program

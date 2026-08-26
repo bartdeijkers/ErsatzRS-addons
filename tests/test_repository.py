@@ -414,6 +414,286 @@ exit 0
             self.assertNotIn("ERSATZRS_ADDON_SETTING_ACTION_ID", contents)
             self.assertNotIn("BEELDENGELUID_ACTION_ID", contents)
 
+    def beeldengeluid_signed_url(self, asset: str) -> str:
+        return (
+            f"https://sk-video.cdn.beeldengeluid.nl/{asset}/cmaf/master.m3u8"
+            "?CloudFront-Policy=policy-value"
+            "&CloudFront-Signature=signature-value"
+            "&CloudFront-Key-Pair-Id=key-value"
+        )
+
+    def beeldengeluid_stream_response(
+        self, parts: list[tuple[str, int, int]]
+    ) -> bytes:
+        """Build one getProgramStreamById response.
+
+        `parts` is (asset, durationNumber, playoutOrder) in the order the
+        provider happens to emit them, which is not necessarily playout order.
+        Signed URLs live in exact-length text rows the index refers to by id.
+        """
+        body = b'0:{"a":"$@1","f":"","q":"","i":false}\n'
+        index = []
+        for offset, (asset, duration, order) in enumerate(parts):
+            row = str(offset + 2)
+            url = self.beeldengeluid_signed_url(asset).encode()
+            body += f"{row}:T{len(url):x},".encode() + url
+            index.append(
+                f'{{"streamId":"{asset}","url":"${row}","start":0,'
+                f'"durationNumber":{duration},"playoutOrder":{order}}}'
+            )
+        body += ('1:{"cleared":true,"streams":[' + ",".join(index) + "]}\n").encode()
+        return body
+
+    def run_beeldengeluid_stream_plan(
+        self, response: bytes, episode_url: str, seek: str = "0"
+    ) -> subprocess.CompletedProcess[str]:
+        script = (
+            ROOT / "addons" / "org.ersatzrs.addon.beeldengeluid" / "libexec"
+            / "stream-plan.ts"
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            body = pathlib.Path(temporary) / "response.rsc"
+            body.write_bytes(response)
+            return subprocess.run(
+                [
+                    "deno", "run", "--quiet", f"--allow-read={body}",
+                    "--allow-env=EPISODE_URL,SEEK_POSITION", str(script), str(body),
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+                env={
+                    **os.environ,
+                    "EPISODE_URL": episode_url,
+                    "SEEK_POSITION": seek,
+                },
+            )
+
+    def run_beeldengeluid_enrich(
+        self, episode_page: str
+    ) -> subprocess.CompletedProcess[str]:
+        addon_root = ROOT / "addons" / "org.ersatzrs.addon.beeldengeluid"
+        with tempfile.TemporaryDirectory() as temporary:
+            fixtures = pathlib.Path(temporary)
+            fixture = fixtures / "detail.html"
+            fixture.write_text(episode_page, encoding="utf-8")
+            if os.name == "nt":
+                fake = fixtures / "fake-curl.cmd"
+                fake.write_text(
+                    '@echo off\ntype "%FAKE_FIXTURE%"\n'
+                    "echo __ERSATZRS_HTTP_STATUS__:200\n",
+                    encoding="utf-8",
+                )
+                command = [
+                    os.environ.get("COMSPEC", "cmd.exe"),
+                    "/d",
+                    "/c",
+                    str(addon_root / "addon.bat"),
+                    "enrich",
+                ]
+            else:
+                fake = fixtures / "fake-curl"
+                fake.write_text(
+                    '#!/bin/sh\ncat "$FAKE_FIXTURE"\n'
+                    'printf "__ERSATZRS_HTTP_STATUS__:200\\n"\n',
+                    encoding="utf-8",
+                )
+                fake.chmod(0o755)
+                command = ["/bin/sh", str(addon_root / "addon.sh"), "enrich"]
+            request = {
+                "source_url": BEELDENGELUID_EPISODE_URL,
+                "record_capability": "media-list.list.v5",
+                "provider_id": "episode:2101608040033953431",
+                "overview_fingerprint": "fingerprint",
+                "item": {
+                    "record_type": "item",
+                    "provider_id": "episode:2101608040033953431",
+                    "source_url": BEELDENGELUID_EPISODE_URL,
+                    "kind": "remote_stream",
+                    "rank": 0,
+                    "title": "Fixture Episode",
+                },
+            }
+            return subprocess.run(
+                command,
+                check=False,
+                capture_output=True,
+                text=True,
+                input=json.dumps(request),
+                env={
+                    **os.environ,
+                    "FAKE_FIXTURE": str(fixture),
+                    "ERSATZRS_ADDON_SETTING_CURL_BIN": str(fake),
+                },
+            )
+
+    def beeldengeluid_program_stream(self, parts: list[tuple[int, int]]) -> str:
+        streams = ",".join(
+            f'{{\\"streamId\\":\\"part-{order}\\",\\"url\\":\\"$2{order}\\",'
+            f'\\"start\\":0,\\"durationNumber\\":{duration},'
+            f'\\"playoutOrder\\":{order}}}'
+            for duration, order in parts
+        )
+        return f'\\"programStream\\":{{\\"cleared\\":true,\\"streams\\":[{streams}]}}'
+
+    @unittest.skipUnless(
+        shutil.which("deno") or shutil.which("deno.exe"), "deno required"
+    )
+    def test_beeldengeluid_totals_the_duration_of_every_archived_part(self) -> None:
+        # An episode archived across three carriers lasts as long as all three
+        # together; reporting only the first part would under-run the schedule.
+        multi_part = (
+            "<h1>Fixture Programme</h1><h3>First episode</h3>"
+            r'<script>\"description\":\"Detailed plot\",'
+            r'\"publishedAtISO\":\"1993-01-24T12:30:00Z\",'
+            + self.beeldengeluid_program_stream([(5636, 0), (5503, 1), (1612, 2)])
+            + "</script>\n"
+        )
+        result = self.run_beeldengeluid_enrich(multi_part)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        rows = [json.loads(line) for line in result.stdout.splitlines()]
+        item = next(row for row in rows if row.get("record_type") != "outcome")
+        self.assertEqual(item["duration_seconds"], 12751)
+
+        # A single-stream episode still reports its own duration.
+        single_part = (
+            "<h1>Fixture Programme</h1><h3>First episode</h3>"
+            r'<script>\"description\":\"Detailed plot\",'
+            r'\"publishedAtISO\":\"1993-01-24T12:30:00Z\",'
+            + self.beeldengeluid_program_stream([(5582, 0)])
+            + "</script>\n"
+        )
+        single = self.run_beeldengeluid_enrich(single_part)
+        self.assertEqual(single.returncode, 0, single.stderr)
+        rows = [json.loads(line) for line in single.stdout.splitlines()]
+        item = next(row for row in rows if row.get("record_type") != "outcome")
+        self.assertEqual(item["duration_seconds"], 5582)
+
+    @unittest.skipUnless(os.name == "nt", "Windows required")
+    def test_windows_beeldengeluid_totals_archived_part_durations(self) -> None:
+        episode_page = (
+            '<h1>Fixture Programme</h1><h3>First Episode</h3>'
+            r'<script>\"program\":{\"id\":\"__EPISODE_ID__\",'
+            r'\"description\":\"Fixture plot\",\"disclaimer\":null,'
+            r'\"publishedAtISO\":\"1993-01-24T12:30:00Z\",'
+            r'\"ageRating\":\"Alle leeftijden\",\"url\":\"fixture\",'
+            + self.beeldengeluid_program_stream([(5636, 0), (5503, 1), (1612, 2)])
+            + '</script>'
+        )
+        # A direct episode link is the source kind that reads the detail page;
+        # aggregate discovery deliberately stays on overview metadata.
+        result = self.run_windows_beeldengeluid_media_list(
+            playlist_url=(
+                "https://schatkamer.beeldengeluid.nl/serie/20/fixture/aflevering/201"
+            ),
+            episode_page=episode_page,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        rows = [json.loads(line) for line in result.stdout.splitlines()]
+        items = [row for row in rows if row.get("record_type") == "item"]
+        self.assertTrue(items, result.stdout)
+        self.assertEqual(items[0]["duration_seconds"], 12751)
+
+    @unittest.skipUnless(pathlib.Path("/bin/sh").exists(), "POSIX shell required")
+    def test_posix_beeldengeluid_totals_archived_part_durations(self) -> None:
+        episode_page = (
+            '<h1>Fixture Series</h1><h3>Fixture Episode</h3>'
+            r'<script>\"description\":\"Fixture plot\",\"disclaimer\":null,'
+            r'\"publishedAtISO\":\"1993-01-24T12:30:00Z\",'
+            r'\"ageRating\":\"Alle leeftijden\",\"url\":\"fixture\",'
+            + self.beeldengeluid_program_stream([(5636, 0), (5503, 1), (1612, 2)])
+            + '</script>'
+        )
+        result = self.run_posix_beeldengeluid_list(
+            "https://schatkamer.beeldengeluid.nl/serie/10/first/aflevering/101",
+            "<html></html>",
+            media_list_contract=True,
+            episode_page=episode_page,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        rows = [json.loads(line) for line in result.stdout.splitlines()]
+        items = [row for row in rows if row.get("record_type") == "item"]
+        self.assertTrue(items, result.stdout)
+        self.assertEqual(items[0]["duration_seconds"], 12751)
+
+    @unittest.skipUnless(shutil.which("deno"), "deno required")
+    def test_beeldengeluid_plays_archived_parts_as_one_ordered_timeline(self) -> None:
+        # Emitted out of playout order on purpose: an episode archived across
+        # several carriers has to play in the provider's stated order, not in
+        # the order its stream index happens to list.
+        response = self.beeldengeluid_stream_response(
+            [("SECOND", 200, 1), ("THIRD", 50, 2), ("FIRST", 100, 0)]
+        )
+        result = self.run_beeldengeluid_stream_plan(
+            response, BEELDENGELUID_EPISODE_URL
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        rows = [line.split("\t") for line in result.stdout.splitlines()]
+        self.assertEqual(
+            [row[0].rsplit("/", 3)[1] for row in rows], ["FIRST", "SECOND", "THIRD"]
+        )
+        self.assertEqual(
+            rows[0][1],
+            "CloudFront-Policy=policy-value; "
+            "CloudFront-Signature=signature-value; "
+            "CloudFront-Key-Pair-Id=key-value",
+        )
+        # The signed query moves into the cookie, so no part keeps it on the URL.
+        self.assertFalse(any("CloudFront" in row[0] for row in rows))
+        # Whole episode: every part plays in full, each offset by what precedes it.
+        self.assertEqual([row[2] for row in rows], ["0", "0", "0"])
+        self.assertEqual([row[3] for row in rows], ["-", "-", "-"])
+        self.assertEqual([row[4] for row in rows], ["0", "100", "300"])
+
+    @unittest.skipUnless(shutil.which("deno"), "deno required")
+    def test_beeldengeluid_seek_selects_the_part_holding_the_position(self) -> None:
+        response = self.beeldengeluid_stream_response(
+            [("FIRST", 100, 0), ("SECOND", 200, 1), ("THIRD", 50, 2)]
+        )
+        result = self.run_beeldengeluid_stream_plan(
+            response, BEELDENGELUID_EPISODE_URL, "00:02:30"
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        rows = [line.split("\t") for line in result.stdout.splitlines()]
+        # 150s lands inside the second part, so the first one is not played at
+        # all and the second starts 50s in rather than seeking every part.
+        self.assertEqual(
+            [row[0].rsplit("/", 3)[1] for row in rows], ["SECOND", "THIRD"]
+        )
+        self.assertEqual([row[2] for row in rows], ["50", "0"])
+        self.assertEqual([row[4] for row in rows], ["0", "150"])
+
+        outside = self.run_beeldengeluid_stream_plan(
+            response, BEELDENGELUID_EPISODE_URL, "00:10:00"
+        )
+        self.assertEqual(outside.returncode, 64)
+        self.assertIn("outside the episode", outside.stderr)
+
+    @unittest.skipUnless(shutil.which("deno"), "deno required")
+    def test_beeldengeluid_chapter_fragment_spans_a_part_boundary(self) -> None:
+        response = self.beeldengeluid_stream_response(
+            [("FIRST", 100, 0), ("SECOND", 200, 1), ("THIRD", 50, 2)]
+        )
+        result = self.run_beeldengeluid_stream_plan(
+            response, f"{BEELDENGELUID_EPISODE_URL}?start=50&end=250"
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        rows = [line.split("\t") for line in result.stdout.splitlines()]
+        # A 200s fragment crossing the boundary contributes 50s of the first
+        # part and 150s of the second, never 200s of each.
+        self.assertEqual(
+            [row[0].rsplit("/", 3)[1] for row in rows], ["FIRST", "SECOND"]
+        )
+        self.assertEqual([row[2] for row in rows], ["50", "0"])
+        self.assertEqual([row[3] for row in rows], ["50", "150"])
+        self.assertEqual([row[4] for row in rows], ["0", "50"])
+
+        rejected = self.run_beeldengeluid_stream_plan(
+            response, f"{BEELDENGELUID_EPISODE_URL}?start=250&end=50"
+        )
+        self.assertEqual(rejected.returncode, 64)
+        self.assertIn("fragment end must be after fragment start", rejected.stderr)
+
     @unittest.skipUnless(pathlib.Path("/bin/sh").exists(), "POSIX shell required")
     def test_posix_readiness_contracts_emit_one_json_object(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

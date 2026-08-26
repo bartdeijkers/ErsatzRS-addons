@@ -35,7 +35,9 @@ run_provider() {
 
 run_media_list_import() {
     export CURL_BIN=$curl_bin
-    if deno run --quiet --allow-env=CURL_BIN --allow-run \
+    if deno run --quiet \
+        --allow-env=CURL_BIN,ERSATZRS_ADDON_SETTING_DUPLICATE_TOLERANCE_SECONDS \
+        --allow-run \
         "$script_dir/libexec/media-list-import.ts" "$operation"
     then
         return 0

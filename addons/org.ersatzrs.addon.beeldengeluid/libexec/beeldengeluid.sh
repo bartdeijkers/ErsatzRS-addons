@@ -93,11 +93,29 @@ json_scalar_value() {
 # page. A page without the index keeps its single duration.
 episode_duration_seconds() {
     duration_file=$1
+    # The archive also holds repeat digitisations of the same carrier,
+    # recognisable only by their nearly equal durations. Collapsing them is
+    # opt-in and must match playback: both keep the first copy of a group in
+    # playout order.
+    duration_tolerance=${ERSATZRS_ADDON_SETTING_DUPLICATE_TOLERANCE_SECONDS:-0}
+    case "$duration_tolerance" in *[!0-9]*) duration_tolerance=0 ;; esac
     duration_total=$(grep -o \
         '\\"durationNumber\\":[0-9][0-9]*,\\"playoutOrder\\":[0-9][0-9]*' \
         "$duration_file" \
         | sed -e 's/^[^:]*://' -e 's/,.*$//' \
-        | awk '{ total += $1 } END { if (NR) print total }')
+        | awk -v tolerance="$duration_tolerance" '
+            {
+                duplicate = 0
+                if (tolerance > 0) {
+                    for (index_ = 1; index_ <= kept; index_++) {
+                        difference = first[index_] - $1
+                        if (difference < 0) difference = -difference
+                        if (difference <= tolerance) { duplicate = 1; break }
+                    }
+                }
+                if (!duplicate) { first[++kept] = $1; total += $1 }
+            }
+            END { if (NR) print total + 0 }')
     if [ -n "$duration_total" ]; then
         printf '%s' "$duration_total"
         return 0
@@ -836,7 +854,8 @@ payload="[\"$video_id\",false]"
 # the concatenated timeline, and reports what each part has to contribute.
 deno run --quiet \
     --allow-read="$response_file" \
-    --allow-env=EPISODE_URL,SEEK_POSITION \
+    --allow-env=EPISODE_URL,SEEK_POSITION,CURL_BIN,ERSATZRS_ADDON_SETTING_DUPLICATE_TOLERANCE_SECONDS \
+    --allow-run \
     "$plan_script" "$response_file" >"$plan_file" \
     || exit $?
 

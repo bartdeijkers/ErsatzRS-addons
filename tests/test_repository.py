@@ -390,8 +390,17 @@ exit 0
         )
         self.assertEqual(
             [setting["key"] for setting in manifest["settings"]],
-            ["MEDIA_STORAGE_PATH", "CURL_BIN"],
+            ["MEDIA_STORAGE_PATH", "DUPLICATE_TOLERANCE_SECONDS", "CURL_BIN"],
         )
+        tolerance = next(
+            setting for setting in manifest["settings"]
+            if setting["key"] == "DUPLICATE_TOLERANCE_SECONDS"
+        )
+        # Collapsing repeat digitisations is a likeness test, so it stays off
+        # until an operator asks for it.
+        self.assertEqual(tolerance["kind"], "integer")
+        self.assertEqual(tolerance["default"], "0")
+        self.assertFalse(tolerance["required"])
         self.assertEqual(
             manifest["media_list_storage"],
             {
@@ -447,32 +456,45 @@ exit 0
         return body
 
     def run_beeldengeluid_stream_plan(
-        self, response: bytes, episode_url: str, seek: str = "0"
+        self,
+        response: bytes,
+        episode_url: str,
+        seek: str = "0",
+        tolerance: str | None = None,
+        curl: str | None = None,
     ) -> subprocess.CompletedProcess[str]:
         script = (
             ROOT / "addons" / "org.ersatzrs.addon.beeldengeluid" / "libexec"
             / "stream-plan.ts"
         )
+        environment = {
+            **os.environ,
+            "EPISODE_URL": episode_url,
+            "SEEK_POSITION": seek,
+        }
+        environment.pop("ERSATZRS_ADDON_SETTING_DUPLICATE_TOLERANCE_SECONDS", None)
+        if tolerance is not None:
+            environment[
+                "ERSATZRS_ADDON_SETTING_DUPLICATE_TOLERANCE_SECONDS"
+            ] = tolerance
+        if curl is not None:
+            environment["CURL_BIN"] = curl
         with tempfile.TemporaryDirectory() as temporary:
             body = pathlib.Path(temporary) / "response.rsc"
             body.write_bytes(response)
             return subprocess.run(
                 [
                     "deno", "run", "--quiet", f"--allow-read={body}",
-                    "--allow-env=EPISODE_URL,SEEK_POSITION", str(script), str(body),
+                    "--allow-env", "--allow-run", str(script), str(body),
                 ],
                 check=False,
                 capture_output=True,
                 text=True,
-                env={
-                    **os.environ,
-                    "EPISODE_URL": episode_url,
-                    "SEEK_POSITION": seek,
-                },
+                env=environment,
             )
 
     def run_beeldengeluid_enrich(
-        self, episode_page: str
+        self, episode_page: str, tolerance: str | None = None
     ) -> subprocess.CompletedProcess[str]:
         addon_root = ROOT / "addons" / "org.ersatzrs.addon.beeldengeluid"
         with tempfile.TemporaryDirectory() as temporary:
@@ -516,17 +538,25 @@ exit 0
                     "title": "Fixture Episode",
                 },
             }
+            environment = {
+                **os.environ,
+                "FAKE_FIXTURE": str(fixture),
+                "ERSATZRS_ADDON_SETTING_CURL_BIN": str(fake),
+            }
+            environment.pop(
+                "ERSATZRS_ADDON_SETTING_DUPLICATE_TOLERANCE_SECONDS", None
+            )
+            if tolerance is not None:
+                environment[
+                    "ERSATZRS_ADDON_SETTING_DUPLICATE_TOLERANCE_SECONDS"
+                ] = tolerance
             return subprocess.run(
                 command,
                 check=False,
                 capture_output=True,
                 text=True,
                 input=json.dumps(request),
-                env={
-                    **os.environ,
-                    "FAKE_FIXTURE": str(fixture),
-                    "ERSATZRS_ADDON_SETTING_CURL_BIN": str(fake),
-                },
+                env=environment,
             )
 
     def beeldengeluid_program_stream(self, parts: list[tuple[int, int]]) -> str:
@@ -670,6 +700,129 @@ exit 0
         )
         self.assertEqual(outside.returncode, 64)
         self.assertIn("outside the episode", outside.stderr)
+
+    @unittest.skipUnless(
+        shutil.which("deno") or shutil.which("deno.exe"), "deno required"
+    )
+    def test_beeldengeluid_duration_follows_the_duplicate_tolerance(self) -> None:
+        # The imported duration is what the schedule reserves, so it has to
+        # collapse exactly what playback collapses.
+        page = (
+            "<h1>Fixture Programme</h1><h3>First episode</h3>"
+            r'<script>\"description\":\"Detailed plot\",'
+            r'\"publishedAtISO\":\"1993-01-24T12:30:00Z\",'
+            + self.beeldengeluid_program_stream(
+                [(1318, 0), (3827, 1), (1316, 2), (1320, 3)]
+            )
+            + "</script>\n"
+        )
+        for tolerance, expected in [(None, 7781), ("1", 7781), ("5", 5145)]:
+            with self.subTest(tolerance=tolerance):
+                result = self.run_beeldengeluid_enrich(page, tolerance=tolerance)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                rows = [json.loads(line) for line in result.stdout.splitlines()]
+                item = next(
+                    row for row in rows if row.get("record_type") != "outcome"
+                )
+                self.assertEqual(item["duration_seconds"], expected)
+
+    @unittest.skipUnless(shutil.which("deno"), "deno required")
+    def test_beeldengeluid_keeps_repeat_digitisations_unless_opted_in(self) -> None:
+        # The same carrier archived three times, plus one genuinely distinct
+        # part. Copies differ by a couple of seconds, which is the only thing
+        # that separates them from real parts.
+        response = self.beeldengeluid_stream_response(
+            [
+                ("COPY-A", 1318, 0),
+                ("MIDDLE", 3827, 1),
+                ("COPY-B", 1316, 2),
+                ("COPY-C", 1320, 3),
+            ]
+        )
+        default = self.run_beeldengeluid_stream_plan(
+            response, BEELDENGELUID_EPISODE_URL
+        )
+        self.assertEqual(default.returncode, 0, default.stderr)
+        rows = [line.split("\t") for line in default.stdout.splitlines()]
+        # Off by default: every copy still plays.
+        self.assertEqual(len(rows), 4)
+        self.assertEqual([row[3] for row in rows], ["-", "-", "-", "-"])
+
+        collapsed = self.run_beeldengeluid_stream_plan(
+            response, BEELDENGELUID_EPISODE_URL, tolerance="5"
+        )
+        self.assertEqual(collapsed.returncode, 0, collapsed.stderr)
+        rows = [line.split("\t") for line in collapsed.stdout.splitlines()]
+        # Renditions are equal here, so the longest copy wins: it is the one
+        # that can fill the length the timeline reserved. The group keeps its
+        # own place, not the winning copy's playout position.
+        self.assertEqual(
+            [row[0].rsplit("/", 3)[1] for row in rows], ["COPY-C", "MIDDLE"]
+        )
+        # The kept copy is bounded to the reserved length, so the schedule
+        # matches whichever copy won.
+        self.assertEqual([row[3] for row in rows], ["1318", "-"])
+        self.assertEqual([row[4] for row in rows], ["0", "1318"])
+        self.assertIn("collapsed 3 copies", collapsed.stderr)
+
+        # The copies sit two seconds apart, so a one-second tolerance is the
+        # threshold actually gating the collapse rather than a formality.
+        narrow = self.run_beeldengeluid_stream_plan(
+            response, BEELDENGELUID_EPISODE_URL, tolerance="1"
+        )
+        self.assertEqual(narrow.returncode, 0, narrow.stderr)
+        self.assertEqual(len(narrow.stdout.splitlines()), 4)
+        self.assertNotIn("collapsed", narrow.stderr)
+
+    @unittest.skipUnless(
+        pathlib.Path("/bin/sh").exists() and shutil.which("deno"),
+        "POSIX shell and deno required",
+    )
+    def test_beeldengeluid_plays_the_largest_rendition(self) -> None:
+        # A master playlist lists renditions smallest first and FFmpeg maps the
+        # first video stream it finds, so the master must not be handed over
+        # as-is.
+        playlist = (
+            "#EXTM3U\n"
+            "#EXT-X-STREAM-INF:BANDWIDTH=774904,RESOLUTION=352x262\n"
+            "small/main.m3u8\n"
+            "#EXT-X-STREAM-INF:BANDWIDTH=2693877,RESOLUTION=704x524\n"
+            "large/main.m3u8\n"
+            "#EXT-X-STREAM-INF:BANDWIDTH=1500000,RESOLUTION=512x384\n"
+            "middle/main.m3u8\n"
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            fake = pathlib.Path(temporary) / "curl"
+            fake.write_text(
+                "#!/bin/sh\ncat <<'PLAYLIST'\n" + playlist + "PLAYLIST\n",
+                encoding="utf-8",
+            )
+            fake.chmod(0o755)
+            result = self.run_beeldengeluid_stream_plan(
+                self.beeldengeluid_stream_response([("ONLY", 100, 0)]),
+                BEELDENGELUID_EPISODE_URL,
+                curl=str(fake),
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        row = result.stdout.splitlines()[0].split("\t")
+        self.assertTrue(
+            row[0].endswith("/ONLY/cmaf/large/main.m3u8"),
+            f"expected the 704x524 rendition, got {row[0]}",
+        )
+
+    @unittest.skipUnless(shutil.which("deno"), "deno required")
+    def test_beeldengeluid_falls_back_to_the_master_playlist(self) -> None:
+        # An unreadable master playlist must not fail playback; FFmpeg can
+        # still open it, just at whichever rendition it picks itself.
+        result = self.run_beeldengeluid_stream_plan(
+            self.beeldengeluid_stream_response([("ONLY", 100, 0)]),
+            BEELDENGELUID_EPISODE_URL,
+            curl="definitely-not-a-program",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        row = result.stdout.splitlines()[0].split("\t")
+        self.assertTrue(row[0].endswith("/ONLY/cmaf/master.m3u8"), row[0])
+        self.assertIn("could not read the renditions", result.stderr)
 
     @unittest.skipUnless(shutil.which("deno"), "deno required")
     def test_beeldengeluid_skips_the_leader_each_carrier_was_digitised_with(

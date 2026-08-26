@@ -149,7 +149,7 @@ if errorlevel 1 (
 rem One Schatkamer episode can be archived across several carriers. The shared
 rem plan module orders them, maps the seek position and any chapter bounds onto
 rem the concatenated timeline, and reports what each part has to contribute.
-deno.exe run --quiet --allow-read="%RSC_FILE%" --allow-env=EPISODE_URL,SEEK_POSITION "%~dp0stream-plan.ts" "%RSC_FILE%" >"%PLAN_FILE%"
+deno.exe run --quiet --allow-read="%RSC_FILE%" --allow-env=EPISODE_URL,SEEK_POSITION,CURL_BIN,ERSATZRS_ADDON_SETTING_DUPLICATE_TOLERANCE_SECONDS --allow-run "%~dp0stream-plan.ts" "%RSC_FILE%" >"%PLAN_FILE%"
 set "PLAN_STATUS=%ERRORLEVEL%"
 if not "%PLAN_STATUS%"=="0" (
     rem Keep the plan module's own status; it separates a rejected definition

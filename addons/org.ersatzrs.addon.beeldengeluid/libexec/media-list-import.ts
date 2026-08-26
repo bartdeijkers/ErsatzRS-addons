@@ -725,12 +725,33 @@ function episodeDuration(html: string): number | undefined {
     ...html.matchAll(
       /"durationNumber"\s*:\s*(\d+)\s*,\s*"playoutOrder"\s*:\s*\d+/gi,
     ),
-  ];
+  ].map((part) => Number(part[1]));
   if (parts.length) {
-    return parts.reduce((total, part) => total + Number(part[1]), 0);
+    // The archive also holds repeat digitisations of the same carrier. They
+    // are only recognisable by their nearly equal durations, so collapsing
+    // them is opt-in and must match what playback does; both keep the first
+    // copy of a group in playout order.
+    const tolerance = duplicateTolerance();
+    const kept: number[] = [];
+    for (const part of parts) {
+      if (
+        tolerance > 0 &&
+        kept.some((first) => Math.abs(first - part) <= tolerance)
+      ) {
+        continue;
+      }
+      kept.push(part);
+    }
+    return kept.reduce((total, part) => total + part, 0);
   }
   const single = html.match(/"durationNumber"\s*:\s*(\d+)/i);
   return single ? Number(single[1]) : undefined;
+}
+
+function duplicateTolerance(): number {
+  const configured = Deno.env
+    .get("ERSATZRS_ADDON_SETTING_DUPLICATE_TOLERANCE_SECONDS")?.trim();
+  return configured && /^\d+$/.test(configured) ? Number(configured) : 0;
 }
 
 function fullItem(

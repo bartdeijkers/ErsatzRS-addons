@@ -29,6 +29,33 @@ digitised with leader before the programme starts reports where its content
 begins, and playback opens past it, so a part's position on the episode
 timeline stays independent of its position inside its own asset.
 
+Each part is streamed at its largest rendition. A Schatkamer master playlist
+lists its renditions smallest first, and FFmpeg maps the first video stream it
+finds, so the add-on resolves the master to the largest picture rather than
+handing the master over as published. If a master cannot be read, playback
+falls back to it and says so on stderr.
+
+## Repeat digitisations
+
+Some episodes list the same carrier several times, because the archive holds
+more than one digitisation of it. Those copies are not marked as such: they are
+recognisable only by durations that land within a few seconds of each other,
+and their renditions are usually identical. Genuine parts of one episode rarely
+have near-equal durations, but that is a likeness test rather than something
+the provider states, so collapsing them is opt-in.
+
+Set **Duplicate part tolerance (seconds)** under **Settings > Add-ons** to the
+largest gap that should still count as the same carrier; `0`, the default,
+keeps every copy. A tolerance of about 5 covers the spread seen in practice.
+Copies within the tolerance of an earlier part are collapsed into it, the
+episode keeps that part's place and length, and playback keeps the copy with
+the largest rendition — falling back to the longest copy when the renditions
+match, which they normally do. Each collapse is reported on stderr.
+
+The tolerance applies to the imported duration as well as to playback, so the
+schedule reserves exactly what is streamed. Change it and re-synchronize the
+add-on list; stored durations are not rewritten until then.
+
 When enabled, ErsatzRS creates a managed local source named `beeldengeluid`.
 Its default root is `<ErsatzRS profile>/beeldengeluid_media`; the path can be
 changed under **Settings > Add-ons**. Every link added through **Media Sources

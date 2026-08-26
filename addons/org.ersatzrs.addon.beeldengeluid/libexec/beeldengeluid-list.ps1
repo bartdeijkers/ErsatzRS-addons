@@ -20,8 +20,29 @@ function EpisodeDurationSeconds([string]$html) {
         '\\\x22durationNumber\\\x22:(\d+),\\\x22playoutOrder\\\x22:\d+'
     )
     if ($parts.Count) {
+        # The archive also holds repeat digitisations of the same carrier,
+        # recognisable only by their nearly equal durations. Collapsing them
+        # is opt-in and must match playback: both keep the first copy of a
+        # group in playout order.
+        [int64]$tolerance = 0
+        $configured = $env:ERSATZRS_ADDON_SETTING_DUPLICATE_TOLERANCE_SECONDS
+        if ($configured -match '^\s*\d+\s*$') { $tolerance = [int64]$configured.Trim() }
+        $kept = [Collections.Generic.List[int64]]::new()
+        foreach ($part in $parts) {
+            $duration = [int64]$part.Groups[1].Value
+            $duplicate = $false
+            if ($tolerance -gt 0) {
+                foreach ($first in $kept) {
+                    if ([Math]::Abs($first - $duration) -le $tolerance) {
+                        $duplicate = $true
+                        break
+                    }
+                }
+            }
+            if (-not $duplicate) { $kept.Add($duration) }
+        }
         $total = [int64]0
-        foreach ($part in $parts) { $total += [int64]$part.Groups[1].Value }
+        foreach ($duration in $kept) { $total += $duration }
         return $total
     }
     $single = [regex]::Match($html, '\\\x22durationNumber\\\x22:(\d+)')

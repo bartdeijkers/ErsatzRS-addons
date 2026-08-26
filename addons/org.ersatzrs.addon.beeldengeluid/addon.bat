@@ -35,7 +35,7 @@ call :require_program "%CURL_BIN%"
 if errorlevel 1 goto :missing
 call :require_program "deno.exe"
 if errorlevel 1 goto :missing
-deno.exe run --quiet --allow-env=CURL_BIN --allow-run "%~dp0libexec\media-list-import.ts" "%OPERATION%"
+deno.exe run --quiet --allow-env=CURL_BIN,ERSATZRS_ADDON_SETTING_DUPLICATE_TOLERANCE_SECONDS --allow-run "%~dp0libexec\media-list-import.ts" "%OPERATION%"
 if errorlevel 1 goto :provider_failed
 exit /b 0
 

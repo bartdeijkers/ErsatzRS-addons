@@ -8,8 +8,10 @@ same platform scripts feed one shared Deno adapter, which normalizes both
 entrypoints to the provider-neutral media-list contract. Media-list v4 supplies
 list and item titles, summaries, classification, credits, provenance, and
 artwork candidates to ErsatzRS's shared metadata review editor on Windows and
-POSIX platforms. The adapter also prefers each programme card's episode still
-over a generic broadcaster image from the episode detail page.
+POSIX platforms. Enrichment takes the still the player shows for that
+programme, falls back to the still the programme's own record names, and
+otherwise keeps the still discovered on its programme card; the shared
+Schatkamer card and a neighbouring episode's still are never adopted.
 
 Video is streamed straight through ErsatzRS for immediate playback; no
 permanent file is written.

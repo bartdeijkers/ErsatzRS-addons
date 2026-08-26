@@ -171,6 +171,32 @@ function imageFromHtml(html: string): string | undefined {
   return undefined;
 }
 
+// A programme page opens with the shared Schatkamer social card and then shows
+// stills of neighbouring episodes, so the first picture in document order
+// belongs to something else. Two payloads name this programme: the player
+// publishes the poster it shows before playback, and the programme record
+// carries its still beside its own identity.
+function episodeImageFromHtml(
+  html: string,
+  episodeId: string,
+): string | undefined {
+  const poster = safeProviderImage(
+    html.match(
+      /"programStream"\s*:\s*\{[\s\S]{0,400}?"poster"\s*:\s*"([^"]+)"/i,
+    )?.[1],
+  );
+  if (poster) return poster;
+  if (!/^\d{1,64}$/.test(episodeId)) return undefined;
+  const record = html.match(
+    new RegExp(
+      `"id"\\s*:\\s*"${episodeId}"[^{}]*?` +
+        `"image"\\s*:\\s*\\{[^{}]*?"url"\\s*:\\s*"([^"]+)"`,
+      "i",
+    ),
+  )?.[1];
+  return safeProviderImage(record);
+}
+
 function dateFromHtml(html: string): string | undefined {
   const explicit = lastJsonString(html, "publishedAtISO") ??
     lastJsonString(html, "datePublished") ??
@@ -775,7 +801,8 @@ function fullItem(
     Number(baseline.duration_seconds);
   const genres = jsonStrings(normalized, "genres");
   const tags = jsonStrings(normalized, "subjects");
-  const image = imageFromHtml(normalized) ??
+  const episodeId = request.provider_id.replace(/^episode:/, "");
+  const image = episodeImageFromHtml(normalized, episodeId) ??
     (Array.isArray(baseline.additional_image_urls)
       ? safeProviderImage(baseline.additional_image_urls[0])
       : undefined);
@@ -787,7 +814,6 @@ function fullItem(
     : age === "Leeftijdsadvies onbekend"
     ? "nl:unknown"
     : age;
-  const episodeId = request.provider_id.replace(/^episode:/, "");
   const collection = plainText(
     normalized.match(/href=["']\/zoeken[?]collectie=[^"']*["'][^>]*>([^<]*)/i)
       ?.[1] ?? "",

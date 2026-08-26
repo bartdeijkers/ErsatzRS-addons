@@ -494,7 +494,10 @@ exit 0
             )
 
     def run_beeldengeluid_enrich(
-        self, episode_page: str, tolerance: str | None = None
+        self,
+        episode_page: str,
+        tolerance: str | None = None,
+        overview_image: str | None = None,
     ) -> subprocess.CompletedProcess[str]:
         addon_root = ROOT / "addons" / "org.ersatzrs.addon.beeldengeluid"
         with tempfile.TemporaryDirectory() as temporary:
@@ -538,6 +541,8 @@ exit 0
                     "title": "Fixture Episode",
                 },
             }
+            if overview_image is not None:
+                request["item"]["additional_image_urls"] = [overview_image]
             environment = {
                 **os.environ,
                 "FAKE_FIXTURE": str(fixture),
@@ -568,6 +573,12 @@ exit 0
         )
         return f'\\"programStream\\":{{\\"cleared\\":true,\\"streams\\":[{streams}]}}'
 
+    def beeldengeluid_enriched_item(
+        self, result: subprocess.CompletedProcess[str]
+    ) -> dict[str, object]:
+        rows = [json.loads(line) for line in result.stdout.splitlines()]
+        return next(row for row in rows if row.get("record_type") != "outcome")
+
     @unittest.skipUnless(
         shutil.which("deno") or shutil.which("deno.exe"), "deno required"
     )
@@ -583,8 +594,7 @@ exit 0
         )
         result = self.run_beeldengeluid_enrich(multi_part)
         self.assertEqual(result.returncode, 0, result.stderr)
-        rows = [json.loads(line) for line in result.stdout.splitlines()]
-        item = next(row for row in rows if row.get("record_type") != "outcome")
+        item = self.beeldengeluid_enriched_item(result)
         self.assertEqual(item["duration_seconds"], 12751)
 
         # A single-stream episode still reports its own duration.
@@ -597,9 +607,64 @@ exit 0
         )
         single = self.run_beeldengeluid_enrich(single_part)
         self.assertEqual(single.returncode, 0, single.stderr)
-        rows = [json.loads(line) for line in single.stdout.splitlines()]
-        item = next(row for row in rows if row.get("record_type") != "outcome")
+        item = self.beeldengeluid_enriched_item(single)
         self.assertEqual(item["duration_seconds"], 5582)
+
+    @unittest.skipUnless(
+        shutil.which("deno") or shutil.which("deno.exe"), "deno required"
+    )
+    def test_beeldengeluid_enrichment_keeps_the_programme_still(self) -> None:
+        # A detail page opens with the shared Schatkamer card and then shows
+        # stills of neighbouring episodes, so document order names a picture of
+        # something else. The still the player shows belongs to this programme.
+        share = "https://schatkamer.beeldengeluid.nl/images/schatkamer-share.jpg"
+        neighbour = "https://sk-video.cdn.beeldengeluid.nl/OTHER/thumbs/still.jpg"
+        own = "https://sk-video.cdn.beeldengeluid.nl/FIXTURE/thumbs/still.jpg"
+        chrome = (
+            f'<meta property="og:image" content="{share}">'
+            f'<img src="{neighbour}">'
+            "<h1>Fixture Programme</h1><h3>First episode</h3>"
+        )
+        played = (
+            chrome + r'<script>\"description\":\"Detailed plot\",'
+            r'\"publishedAtISO\":\"1993-01-24T12:30:00Z\",'
+            r'\"programStream\":{\"cleared\":true,\"poster\":\"'
+            + own
+            + r'\"}</script>'
+            "\n"
+        )
+        result = self.run_beeldengeluid_enrich(played)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        item = self.beeldengeluid_enriched_item(result)
+        self.assertEqual(item["additional_image_urls"], [own])
+        self.assertEqual(item["metadata"]["artwork"], [{"url": own, "role": "thumb"}])
+
+        # A page without a player still names the programme in its own record.
+        recorded = (
+            chrome + r'<script>\"id\":\"2101608040033953431\",'
+            r'\"title\":\"First episode\",'
+            r'\"image\":{\"name\":\"First episode\",\"url\":\"'
+            + own
+            + r'\"},\"description\":\"Detailed plot\",'
+            r'\"publishedAtISO\":\"1993-01-24T12:30:00Z\"</script>'
+            "\n"
+        )
+        result = self.run_beeldengeluid_enrich(recorded)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        item = self.beeldengeluid_enriched_item(result)
+        self.assertEqual(item["additional_image_urls"], [own])
+
+        # Without either payload the still discovery collected is kept, so an
+        # unavailable programme never falls back to the shared card.
+        unnamed = (
+            chrome + r'<script>\"description\":\"Detailed plot\",'
+            r'\"publishedAtISO\":\"1993-01-24T12:30:00Z\"</script>'
+            "\n"
+        )
+        result = self.run_beeldengeluid_enrich(unnamed, overview_image=own)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        item = self.beeldengeluid_enriched_item(result)
+        self.assertEqual(item["additional_image_urls"], [own])
 
     @unittest.skipUnless(os.name == "nt", "Windows required")
     def test_windows_beeldengeluid_totals_archived_part_durations(self) -> None:
@@ -720,10 +785,7 @@ exit 0
             with self.subTest(tolerance=tolerance):
                 result = self.run_beeldengeluid_enrich(page, tolerance=tolerance)
                 self.assertEqual(result.returncode, 0, result.stderr)
-                rows = [json.loads(line) for line in result.stdout.splitlines()]
-                item = next(
-                    row for row in rows if row.get("record_type") != "outcome"
-                )
+                item = self.beeldengeluid_enriched_item(result)
                 self.assertEqual(item["duration_seconds"], expected)
 
     @unittest.skipUnless(shutil.which("deno"), "deno required")

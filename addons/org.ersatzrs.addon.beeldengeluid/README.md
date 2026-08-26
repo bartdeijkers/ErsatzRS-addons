@@ -24,7 +24,10 @@ A seek position and a chapter fragment both address that concatenated timeline,
 so they select the part that actually contains the requested moment instead of
 being applied to every part. Parts that end before the requested position are
 skipped, and each part's output timestamps are offset by everything already
-emitted so the timeline never steps backwards at a part boundary.
+emitted so the timeline never steps backwards at a part boundary. A carrier
+digitised with leader before the programme starts reports where its content
+begins, and playback opens past it, so a part's position on the episode
+timeline stays independent of its position inside its own asset.
 
 When enabled, ErsatzRS creates a managed local source named `beeldengeluid`.
 Its default root is `<ErsatzRS profile>/beeldengeluid_media`; the path can be

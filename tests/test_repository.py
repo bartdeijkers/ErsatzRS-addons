@@ -423,13 +423,14 @@ exit 0
         )
 
     def beeldengeluid_stream_response(
-        self, parts: list[tuple[str, int, int]]
+        self, parts: list[tuple[str, int, int]], start: int = 0
     ) -> bytes:
         """Build one getProgramStreamById response.
 
         `parts` is (asset, durationNumber, playoutOrder) in the order the
         provider happens to emit them, which is not necessarily playout order.
         Signed URLs live in exact-length text rows the index refers to by id.
+        `start` is the leader each carrier was digitised with.
         """
         body = b'0:{"a":"$@1","f":"","q":"","i":false}\n'
         index = []
@@ -438,7 +439,8 @@ exit 0
             url = self.beeldengeluid_signed_url(asset).encode()
             body += f"{row}:T{len(url):x},".encode() + url
             index.append(
-                f'{{"streamId":"{asset}","url":"${row}","start":0,'
+                f'{{"streamId":"{asset}","url":"${row}","start":{start},'
+                f'"end":{start + duration},'
                 f'"durationNumber":{duration},"playoutOrder":{order}}}'
             )
         body += ('1:{"cleared":true,"streams":[' + ",".join(index) + "]}\n").encode()
@@ -668,6 +670,34 @@ exit 0
         )
         self.assertEqual(outside.returncode, 64)
         self.assertIn("outside the episode", outside.stderr)
+
+    @unittest.skipUnless(shutil.which("deno"), "deno required")
+    def test_beeldengeluid_skips_the_leader_each_carrier_was_digitised_with(
+        self,
+    ) -> None:
+        # Some carriers carry leader before the programme starts, so a part's
+        # position on the episode timeline is not its position in the asset.
+        response = self.beeldengeluid_stream_response(
+            [("FIRST", 100, 0), ("SECOND", 200, 1)], start=2
+        )
+        result = self.run_beeldengeluid_stream_plan(
+            response, BEELDENGELUID_EPISODE_URL
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        rows = [line.split("\t") for line in result.stdout.splitlines()]
+        # Every part opens past its own leader, and the episode timeline still
+        # runs from zero.
+        self.assertEqual([row[2] for row in rows], ["2", "2"])
+        self.assertEqual([row[4] for row in rows], ["0", "100"])
+
+        seeked = self.run_beeldengeluid_stream_plan(
+            response, BEELDENGELUID_EPISODE_URL, "00:00:30"
+        )
+        self.assertEqual(seeked.returncode, 0, seeked.stderr)
+        rows = [line.split("\t") for line in seeked.stdout.splitlines()]
+        # 30s into the episode is 32s into the first asset.
+        self.assertEqual([row[2] for row in rows], ["32", "2"])
+        self.assertEqual([row[4] for row in rows], ["0", "70"])
 
     @unittest.skipUnless(shutil.which("deno"), "deno required")
     def test_beeldengeluid_chapter_fragment_spans_a_part_boundary(self) -> None:

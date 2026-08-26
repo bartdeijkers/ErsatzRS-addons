@@ -18,6 +18,10 @@ const STREAM_HOST = "sk-video.cdn.beeldengeluid.nl";
 
 interface ProviderStream {
   playoutOrder: number;
+  // Where this part's programme content begins inside its own asset. Some
+  // carriers were digitised with leader before the programme starts, so a
+  // part's timeline position is not necessarily its asset's position.
+  startSeconds: number;
   durationSeconds?: number;
   url: string;
   cookie: string;
@@ -137,6 +141,9 @@ function providerStreams(rows: Map<string, string>): ProviderStream[] {
         playoutOrder: typeof stream.playoutOrder === "number"
           ? stream.playoutOrder
           : index,
+        startSeconds: typeof stream.start === "number" && stream.start > 0
+          ? stream.start
+          : 0,
         durationSeconds: typeof duration === "number" && duration > 0
           ? Math.round(duration)
           : undefined,
@@ -153,7 +160,11 @@ function providerStreams(rows: Map<string, string>): ProviderStream[] {
   const recovered: ProviderStream[] = [];
   for (const row of rows.values()) {
     if (!row.includes(STREAM_HOST) || !row.includes(".m3u8")) continue;
-    recovered.push({ playoutOrder: recovered.length, ...signedStream(row) });
+    recovered.push({
+      playoutOrder: recovered.length,
+      startSeconds: 0,
+      ...signedStream(row),
+    });
   }
   if (!recovered.length) throw new Error("no signed HLS stream URL was found");
   return recovered;
@@ -167,7 +178,7 @@ function plan(
   if (streams.some((stream) => stream.durationSeconds === undefined)) {
     return streams.map((stream, index) => ({
       ...stream,
-      seekSeconds: index === 0 ? windowStart : 0,
+      seekSeconds: stream.startSeconds + (index === 0 ? windowStart : 0),
       durationLimit: index === 0 && windowEnd !== undefined
         ? windowEnd - windowStart
         : undefined,
@@ -184,7 +195,9 @@ function plan(
     const from = Math.max(partStart, windowStart);
     parts.push({
       ...stream,
-      seekSeconds: from - partStart,
+      // Seek within the asset, which is the part's own leader plus how far
+      // into the part the requested position falls.
+      seekSeconds: stream.startSeconds + (from - partStart),
       durationLimit: windowEnd === undefined
         ? undefined
         : Math.min(partEnd, windowEnd) - from,

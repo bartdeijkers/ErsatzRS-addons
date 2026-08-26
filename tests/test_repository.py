@@ -1270,7 +1270,8 @@ exit 0
     def test_posix_beeldengeluid_names_a_shared_list_after_the_list_itself(self) -> None:
         shared_page = (
             r'<script>\"title\":\"Teleac \u0026 Friends\",\"description\":\"Gedeelde lijst\",'
-            r'\"url\":\"https://schatkamer.beeldengeluid.nl/serie/10/first/aflevering/101\",\"isPlayable\":true</script>'
+            r'\"id\":\"101\",\"isPlayable\":true,'
+            r'\"url\":\"https://schatkamer.beeldengeluid.nl/serie/10/first/aflevering/101\"</script>'
         )
         result = self.run_posix_beeldengeluid_list(
             "https://schatkamer.beeldengeluid.nl/lijst/14df8d33-ce8a-4680-a83b-0cc2a9c58bcd",
@@ -1289,10 +1290,14 @@ exit 0
     def test_posix_beeldengeluid_enumerates_public_shared_list_in_order(self) -> None:
         shared_page = (
             r'<script>\"description\":\"Gedeelde lijst\",'
-            r'\"url\":\"https://schatkamer.beeldengeluid.nl/serie/10/first/aflevering/101\",\"isPlayable\":true,'
-            r'\"url\":\"https://schatkamer.beeldengeluid.nl/serie/10/missing/aflevering/102\",\"isPlayable\":false,'
-            r'\"url\":\"https://schatkamer.beeldengeluid.nl/serie/10/first/aflevering/101\",\"isPlayable\":true,'
-            r'\"url\":\"https://schatkamer.beeldengeluid.nl/serie/11/last/aflevering/103\",\"isPlayable\":true</script>'
+            r'\"id\":\"101\",\"isPlayable\":true,'
+            r'\"url\":\"https://schatkamer.beeldengeluid.nl/serie/10/first/aflevering/101\",'
+            r'\"id\":\"102\",\"isPlayable\":false,'
+            r'\"url\":\"https://schatkamer.beeldengeluid.nl/serie/10/missing/aflevering/102\",'
+            r'\"id\":\"101\",\"isPlayable\":true,'
+            r'\"url\":\"https://schatkamer.beeldengeluid.nl/serie/10/first/aflevering/101\",'
+            r'\"id\":\"103\",\"isPlayable\":true,'
+            r'\"url\":\"https://schatkamer.beeldengeluid.nl/serie/11/last/aflevering/103\"</script>'
         )
         result = self.run_posix_beeldengeluid_list(
             "https://schatkamer.beeldengeluid.nl/lijst/14df8d33-ce8a-4680-a83b-0cc2a9c58bcd",
@@ -1328,13 +1333,17 @@ exit 0
     def test_posix_beeldengeluid_paginates_and_deduplicates_shared_lists(self) -> None:
         first_page = (
             r'<script>\"description\":\"Gedeelde lijst\",'
-            r'\"url\":\"https://schatkamer.beeldengeluid.nl/serie/10/first/aflevering/101\",\"isPlayable\":true,'
-            r'\"url\":\"https://schatkamer.beeldengeluid.nl/serie/10/second/aflevering/103\",\"isPlayable\":true</script>'
+            r'\"id\":\"101\",\"isPlayable\":true,'
+            r'\"url\":\"https://schatkamer.beeldengeluid.nl/serie/10/first/aflevering/101\",'
+            r'\"id\":\"103\",\"isPlayable\":true,'
+            r'\"url\":\"https://schatkamer.beeldengeluid.nl/serie/10/second/aflevering/103\"</script>'
         )
         second_page = (
             r'<script>\"description\":\"Gedeelde lijst\",'
-            r'\"url\":\"https://schatkamer.beeldengeluid.nl/serie/10/second/aflevering/103\",\"isPlayable\":true,'
-            r'\"url\":\"https://schatkamer.beeldengeluid.nl/serie/10/third/aflevering/104\",\"isPlayable\":true</script>'
+            r'\"id\":\"103\",\"isPlayable\":true,'
+            r'\"url\":\"https://schatkamer.beeldengeluid.nl/serie/10/second/aflevering/103\",'
+            r'\"id\":\"104\",\"isPlayable\":true,'
+            r'\"url\":\"https://schatkamer.beeldengeluid.nl/serie/10/third/aflevering/104\"</script>'
         )
         result = self.run_posix_beeldengeluid_list(
             "https://schatkamer.beeldengeluid.nl/lijst/14df8d33-ce8a-4680-a83b-0cc2a9c58bcd",

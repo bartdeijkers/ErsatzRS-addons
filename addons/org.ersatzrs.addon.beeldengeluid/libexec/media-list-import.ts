@@ -311,7 +311,7 @@ function extractOverviewItems(rawHtml: string): OverviewItem[] {
   // identity and accept it only when the link it introduces names that same
   // episode; the series object wrapping a card carries an identity too.
   const jsonRecord =
-    /"id"\s*:\s*"(?<id>\d{1,64})"\s*,\s*(?<body>"title"[\s\S]{0,2400}?)"url"\s*:\s*"https:\/\/schatkamer[.]beeldengeluid[.]nl(?<path>\/serie\/\d+\/[^"\/]+\/aflevering\/(?<pathId>\d{1,64}))"/gi;
+    /"id"\s*:\s*"(?<id>\d{1,64})"(?<body>[\s\S]{0,2400}?)"url"\s*:\s*"https:\/\/schatkamer[.]beeldengeluid[.]nl(?<path>\/serie\/\d+\/[^"\/]+\/aflevering\/(?<pathId>\d{1,64}))"/gi;
   let record = jsonRecord.exec(html);
   while (record) {
     const path = record.groups?.path;

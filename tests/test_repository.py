@@ -1631,9 +1631,10 @@ printf '%s\n' '{"title":"Fixture playlist","description":"Fixture list descripti
             self.assertEqual(rows[2]["title"], "First episode")
             self.assertEqual(rows[2]["metadata"]["plot"], "Overview plot")
             self.assertEqual(rows[2]["metadata"]["release_date"], "1993-01-24")
+            self.assertNotIn("thumbnail_url", rows[2])
             self.assertEqual(
-                rows[2]["thumbnail_url"],
-                "https://schatkamer.beeldengeluid.nl/assets/episode.jpg",
+                rows[2]["additional_image_urls"],
+                ["https://schatkamer.beeldengeluid.nl/assets/episode.jpg"],
             )
             self.assertEqual(rows[2]["liveness"], "finite")
             overview_calls = calls.read_text(encoding="utf-8").splitlines()
@@ -1762,9 +1763,10 @@ printf '%s\n' '{"title":"Fixture playlist","description":"Fixture list descripti
             self.assertTrue(rows[0]["complete"])
             self.assertEqual(rows[2]["metadata"]["plot"], "Overview plot")
             self.assertEqual(rows[2]["metadata"]["release_date"], "2024-08-21")
+            self.assertNotIn("thumbnail_url", rows[2])
             self.assertEqual(
-                rows[2]["thumbnail_url"],
-                "https://images.example.test/thumb.jpg",
+                rows[2]["additional_image_urls"],
+                ["https://images.example.test/thumb.jpg"],
             )
             self.assertEqual(
                 [row["liveness"] for row in rows[2:]],

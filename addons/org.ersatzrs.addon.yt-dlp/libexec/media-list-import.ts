@@ -240,7 +240,6 @@ function providerItem(
       ? Math.round(duration)
       : undefined,
     liveness: liveness(entry),
-    thumbnail_url: artwork(entry, "thumb")[0]?.url,
     additional_image_urls: artwork(entry, "thumb").map((candidate) =>
       candidate.url
     ),

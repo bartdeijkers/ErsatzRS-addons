@@ -234,8 +234,6 @@ export function normalizeRecord(value: unknown, line: number): JsonObject {
     const candidate = text(source[field]);
     if (candidate) result[field] = candidate;
   }
-  const thumbnailUrl = safeHttpsUrl(source.thumbnail_url);
-  if (thumbnailUrl) result.thumbnail_url = thumbnailUrl;
   for (
     const field of [
       "duration_seconds",

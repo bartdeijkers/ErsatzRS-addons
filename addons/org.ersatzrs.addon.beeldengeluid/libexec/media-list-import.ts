@@ -549,7 +549,6 @@ function overviewRecord(item: OverviewItem, rank: number): JsonObject {
     availability_reason: item.playable === false ? "not_playable" : undefined,
     content_kind: "auto",
     liveness: "finite",
-    thumbnail_url: item.image,
     additional_image_urls: item.image ? [item.image] : [],
     metadata: {
       title: item.title,

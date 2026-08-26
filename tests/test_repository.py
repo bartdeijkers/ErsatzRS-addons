@@ -76,17 +76,24 @@ class RepositoryTests(unittest.TestCase):
                 if rank == 6
                 else f"Strip- en cartoontekenen - Aflevering {rank + 1}"
             )
+            # The provider publishes each record identity first and closes it
+            # with the link it describes, which is what the importer anchors on.
             embedded.append(
                 {
-                    "url": "https://schatkamer.beeldengeluid.nl" + path,
-                    "isPlayable": rank != 6,
+                    "id": episode_id,
                     "title": provider_title,
+                    "seriesTitle": "Strip- en cartoontekenen",
                     "description": f"Uitgebreide providerbeschrijving voor les {rank + 1}.",
+                    "image": {
+                        "name": provider_title,
+                        "url": (
+                            "https://schatkamer.beeldengeluid.nl/assets/"
+                            f"provider-{rank + 1}.jpg"
+                        ),
+                    },
                     "publishedAtISO": release_date + "T12:00:00Z",
-                    "image": (
-                        "https://schatkamer.beeldengeluid.nl/assets/"
-                        f"provider-{rank + 1}.jpg"
-                    ),
+                    "isPlayable": rank != 6,
+                    "url": "https://schatkamer.beeldengeluid.nl" + path,
                 }
             )
         return "".join(cards) + f"<script>{json.dumps(embedded)}</script>", episode_ids
@@ -1881,13 +1888,28 @@ printf '%s\n' '{"title":"Fixture playlist","description":"Fixture list descripti
             [f"episode:{episode_id}" for episode_id in episode_ids],
         )
         self.assertEqual([row["rank"] for row in items], list(range(8)))
+        # Each record must contribute its own fields. The provider closes a
+        # record with the link it describes, so an importer that reads past
+        # that link titles every episode after its successor.
+        self.assertEqual(
+            [row["title"] for row in items],
+            [
+                "Les 7: Cartoon, strook en paginaverhaal"
+                if rank == 6
+                else f"Strip- en cartoontekenen - Aflevering {rank + 1}"
+                for rank in range(8)
+            ],
+        )
+        self.assertEqual(
+            [row["metadata"]["plot"] for row in items],
+            [
+                f"Uitgebreide providerbeschrijving voor les {rank + 1}."
+                for rank in range(8)
+            ],
+        )
         unavailable = items[6]
         self.assertEqual(unavailable["provider_id"], "episode:2101608050040897831")
         self.assertEqual(unavailable["rank"], 6)
-        self.assertEqual(
-            unavailable["title"], "Les 7: Cartoon, strook en paginaverhaal"
-        )
-        self.assertEqual(unavailable["metadata"]["plot"], "Uitgebreide providerbeschrijving voor les 7.")
         self.assertEqual(unavailable["metadata"]["release_date"], "1993-03-07")
         self.assertEqual(unavailable["availability"], "unavailable")
         self.assertEqual(unavailable["availability_reason"], "not_playable")
@@ -1980,10 +2002,10 @@ printf '%s\n' '{"title":"Fixture playlist","description":"Fixture list descripti
         )
         return (
             prefix
-            + '{"url":"https://schatkamer.beeldengeluid.nl/serie/20/'
-            'strip-en-cartoontekenen/aflevering/2101608050040897831",'
-            '"isPlayable":false,"title":"Niet afspeelbaar",'
-            '"publishedAtISO":"1993-03-07T12:00:00Z"}</script>'
+            + '{"id":"2101608050040897831","title":"Niet afspeelbaar",'
+            '"publishedAtISO":"1993-03-07T12:00:00Z","isPlayable":false,'
+            '"url":"https://schatkamer.beeldengeluid.nl/serie/20/'
+            'strip-en-cartoontekenen/aflevering/2101608050040897831"}</script>'
         )
 
     @unittest.skipUnless(

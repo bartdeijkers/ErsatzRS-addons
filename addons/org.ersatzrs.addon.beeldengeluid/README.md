@@ -8,55 +8,11 @@ same platform scripts feed one shared Deno adapter, which normalizes both
 entrypoints to the provider-neutral media-list contract. Media-list v4 supplies
 list and item titles, summaries, classification, credits, provenance, and
 artwork candidates to ErsatzRS's shared metadata review editor on Windows and
-POSIX platforms. Enrichment takes the still the player shows for that
-programme, falls back to the still the programme's own record names, and
-otherwise keeps the still discovered on its programme card; the shared
-Schatkamer card and a neighbouring episode's still are never adopted.
+POSIX platforms. The adapter also prefers each programme card's episode still
+over a generic broadcaster image from the episode detail page.
 
 Video is streamed straight through ErsatzRS for immediate playback; no
 permanent file is written.
-
-## Episodes archived in several parts
-
-A programme that was archived across several analogue carriers is published as
-one episode with several streams. The add-on treats them as one continuous
-programme: the reported duration is the sum of every part, and playback emits
-the parts back to back in the provider's playout order as one MPEG-TS timeline.
-A seek position and a chapter fragment both address that concatenated timeline,
-so they select the part that actually contains the requested moment instead of
-being applied to every part. Parts that end before the requested position are
-skipped, and each part's output timestamps are offset by everything already
-emitted so the timeline never steps backwards at a part boundary. A carrier
-digitised with leader before the programme starts reports where its content
-begins, and playback opens past it, so a part's position on the episode
-timeline stays independent of its position inside its own asset.
-
-Each part is streamed at its largest rendition. A Schatkamer master playlist
-lists its renditions smallest first, and FFmpeg maps the first video stream it
-finds, so the add-on resolves the master to the largest picture rather than
-handing the master over as published. If a master cannot be read, playback
-falls back to it and says so on stderr.
-
-## Repeat digitisations
-
-Some episodes list the same carrier several times, because the archive holds
-more than one digitisation of it. Those copies are not marked as such: they are
-recognisable only by durations that land within a few seconds of each other,
-and their renditions are usually identical. Genuine parts of one episode rarely
-have near-equal durations, but that is a likeness test rather than something
-the provider states, so collapsing them is opt-in.
-
-Set **Duplicate part tolerance (seconds)** under **Settings > Add-ons** to the
-largest gap that should still count as the same carrier; `0`, the default,
-keeps every copy. A tolerance of about 5 covers the spread seen in practice.
-Copies within the tolerance of an earlier part are collapsed into it, the
-episode keeps that part's place and length, and playback keeps the copy with
-the largest rendition — falling back to the longest copy when the renditions
-match, which they normally do. Each collapse is reported on stderr.
-
-The tolerance applies to the imported duration as well as to playback, so the
-schedule reserves exactly what is streamed. Change it and re-synchronize the
-add-on list; stored durations are not rewritten until then.
 
 When enabled, ErsatzRS creates a managed local source named `beeldengeluid`.
 Its default root is `<ErsatzRS profile>/beeldengeluid_media`; the path can be

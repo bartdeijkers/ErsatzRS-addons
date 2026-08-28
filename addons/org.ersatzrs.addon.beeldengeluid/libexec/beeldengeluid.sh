@@ -8,7 +8,6 @@ set -f
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 adapter_script="$script_dir/media-list-adapter.ts"
 importer_script="$script_dir/media-list-import.ts"
-plan_script="$script_dir/stream-plan.ts"
 
 usage() {
     echo "Usage: beeldengeluid.sh list <Schatkamer series or shared-list URL>" >&2
@@ -84,44 +83,6 @@ json_scalar_value() {
             -e 's/\\\\\\"/"/g' \
             -e 's/\\u0026/\&/g' \
         | html_decode
-}
-
-# A programme that was archived across several analogue carriers publishes one
-# stream entry per part, and the episode runs as long as all of them together.
-# Only entries in that stream index carry a playout position, so pairing the
-# two fields selects the parts and ignores durations published elsewhere on the
-# page. A page without the index keeps its single duration.
-episode_duration_seconds() {
-    duration_file=$1
-    # The archive also holds repeat digitisations of the same carrier,
-    # recognisable only by their nearly equal durations. Collapsing them is
-    # opt-in and must match playback: both keep the first copy of a group in
-    # playout order.
-    duration_tolerance=${ERSATZRS_ADDON_SETTING_DUPLICATE_TOLERANCE_SECONDS:-0}
-    case "$duration_tolerance" in *[!0-9]*) duration_tolerance=0 ;; esac
-    duration_total=$(grep -o \
-        '\\"durationNumber\\":[0-9][0-9]*,\\"playoutOrder\\":[0-9][0-9]*' \
-        "$duration_file" \
-        | sed -e 's/^[^:]*://' -e 's/,.*$//' \
-        | awk -v tolerance="$duration_tolerance" '
-            {
-                duplicate = 0
-                if (tolerance > 0) {
-                    for (index_ = 1; index_ <= kept; index_++) {
-                        difference = first[index_] - $1
-                        if (difference < 0) difference = -difference
-                        if (difference <= tolerance) { duplicate = 1; break }
-                    }
-                }
-                if (!duplicate) { first[++kept] = $1; total += $1 }
-            }
-            END { if (NR) print total + 0 }')
-    if [ -n "$duration_total" ]; then
-        printf '%s' "$duration_total"
-        return 0
-    fi
-    grep -o '\\"durationNumber\\":[0-9][0-9]*' "$duration_file" \
-        | sed -n '1{s/^.*://;p;}'
 }
 
 json_ld_series_value() {
@@ -538,8 +499,9 @@ list_playlist() {
         [ -n "$episode_image" ] || episode_image=$list_image
         plot=$(json_scalar_value description disclaimer \
             "$list_work_dir/episode.html" | json_escape)
-        duration_seconds=$(episode_duration_seconds \
-            "$list_work_dir/episode.html")
+        duration_seconds=$(grep -o '\\"durationNumber\\":[0-9][0-9]*' \
+            "$list_work_dir/episode.html" \
+            | sed -n '1{s/^.*://;p;}')
         release_date=$(grep -o '\\"publishedAtISO\\":\\"[0-9][0-9][0-9][0-9]-[^\"]*' \
             "$list_work_dir/episode.html" \
             | sed -n '$ s/^.*\\"\([0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]\).*$/\1/p')
@@ -697,6 +659,38 @@ find_program() {
     fi
 }
 
+query_value() {
+    query_string=$1
+    wanted_name=$2
+    old_ifs=$IFS
+    IFS='&'
+    set -- $query_string
+    IFS=$old_ifs
+    for query_part do
+        case "$query_part" in
+            "$wanted_name="*)
+                printf '%s' "${query_part#*=}"
+                return 0
+                ;;
+        esac
+    done
+    return 1
+}
+
+# CloudFront uses a URL-safe Base64 alphabet, but signed query values may
+# percent-encode padding or the standard Base64 characters. Decode exactly
+# those characters before moving the values from the query into cookies.
+decode_cloudfront_value() {
+    printf '%s' "$1" | sed \
+        -e 's/%2[Bb]/+/g' \
+        -e 's/%2[Ff]/\//g' \
+        -e 's/%3[Dd]/=/g' \
+        -e 's/%2[Dd]/-/g' \
+        -e 's/%5[Ff]/_/g' \
+        -e 's/%7[Ee]/~/g' \
+        -e 's/%25/%/g'
+}
+
 if [ "${1:-}" = "list" ]; then
     shift
     list_playlist "$@"
@@ -725,6 +719,28 @@ esac
 
 url_without_query=${episode_url%%\?*}
 url_without_query=${url_without_query%%\#*}
+fragment_duration=
+case "$episode_url" in
+    *\?*)
+        fragment_query=${episode_url#*\?}
+        fragment_query=${fragment_query%%\#*}
+        fragment_start=$(query_value "$fragment_query" start || true)
+        fragment_end=$(query_value "$fragment_query" end || true)
+        if [ -n "$fragment_start" ]; then
+            case "$fragment_start" in *[!0-9]*) fail "fragment start must be whole seconds" 64 ;; esac
+            if [ "$seek_position" = 0 ]; then
+                seek_position=$fragment_start
+            fi
+        fi
+        if [ -n "$fragment_end" ]; then
+            case "$fragment_end" in *[!0-9]*) fail "fragment end must be whole seconds" 64 ;; esac
+            [ -n "$fragment_start" ] || fail "fragment end requires fragment start" 64
+            [ "$fragment_end" -gt "$fragment_start" ] \
+                || fail "fragment end must be after fragment start" 64
+            fragment_duration=$((fragment_end - fragment_start))
+        fi
+        ;;
+esac
 video_id=${url_without_query##*/}
 case "$video_id" in
     '' | *[!0-9]*)
@@ -737,24 +753,19 @@ ffmpeg_bin=${FFMPEG_BIN:-ffmpeg}
 find_program "$curl_bin" "curl"
 find_program "$ffmpeg_bin" "FFmpeg"
 find_program grep "grep"
+find_program dd "dd"
 find_program sed "sed"
 find_program mktemp "mktemp"
-find_program deno "Deno"
 if ! printf '%s\n' "$seek_position" \
     | LC_ALL=C grep -Eq '^(0|[0-9]+:[0-9]{2}:[0-9]{2}([.][0-9]+)?)$'; then
     fail "the seek timestamp is invalid" 64
 fi
 
-# The plan module reads the episode URL and seek position from the
-# environment so neither value passes through another layer of quoting.
-EPISODE_URL=$episode_url
-SEEK_POSITION=$seek_position
-export EPISODE_URL SEEK_POSITION
-
 work_dir=$(mktemp -d "${TMPDIR:-/tmp}/ersatzrs-beeldengeluid.XXXXXX") \
     || fail "unable to create a temporary directory"
 response_file=$work_dir/response.rsc
-plan_file=$work_dir/plan.tsv
+markers_file=$work_dir/markers.txt
+streams_file=$work_dir/streams.txt
 page_file=$work_dir/page.html
 chunks_file=$work_dir/chunks.txt
 chunk_file=$work_dir/chunk.js
@@ -763,7 +774,8 @@ cookies_file=$work_dir/cookies.txt
 cleanup() {
     rm -f \
         "$response_file" \
-        "$plan_file" \
+        "$markers_file" \
+        "$streams_file" \
         "$page_file" \
         "$chunks_file" \
         "$chunk_file" \
@@ -849,29 +861,73 @@ payload="[\"$video_id\",false]"
     "$url_without_query" \
     || fail "the Schatkamer stream request failed"
 
-# One Schatkamer episode can be archived across several carriers. The shared
-# plan module orders them, maps the seek position and any chapter bounds onto
-# the concatenated timeline, and reports what each part has to contribute.
-deno run --quiet \
-    --allow-read="$response_file" \
-    --allow-env=EPISODE_URL,SEEK_POSITION,CURL_BIN,ERSATZRS_ADDON_SETTING_DUPLICATE_TOLERANCE_SECONDS \
-    --allow-run \
-    "$plan_script" "$response_file" >"$plan_file" \
-    || exit $?
+# RSC text chunks use "<row>:T<hex-size>,<content>". Locate each marker by
+# byte offset, then use dd to read the declared number of bytes so adjacent
+# chunks cannot corrupt a signed URL.
+LC_ALL=C grep -aobE '[0-9]+:T[0-9a-fA-F]+,' "$response_file" >"$markers_file" || true
+: >"$streams_file"
 
-[ -s "$plan_file" ] || fail "no signed HLS stream URL was found"
+while IFS= read -r marker_match; do
+    [ -n "$marker_match" ] || continue
+    marker_offset=${marker_match%%:*}
+    marker=${marker_match#*:}
+    hex_size=${marker#*T}
+    hex_size=${hex_size%,}
+    chunk_size=$((0x$hex_size))
+    chunk_start=$((marker_offset + ${#marker}))
+    chunk=$(dd if="$response_file" bs=1 skip="$chunk_start" count="$chunk_size" 2>/dev/null)
 
-tab=$(printf '\t')
-while IFS="$tab" read -r base_url cookie part_seek part_duration timestamp_offset; do
-    [ -n "$base_url" ] || continue
-    set -- -nostdin -hide_banner -loglevel error \
-        -ss "$part_seek" -headers "Cookie: $cookie" -i "$base_url"
-    [ "$part_duration" = - ] || set -- "$@" -t "$part_duration"
-    set -- "$@" -map 0:v:0? -map 0:a:0? -c copy
-    # Each part is a separate FFmpeg run whose output timeline restarts at
-    # zero. Offsetting it keeps the concatenated stdout timeline monotonic.
-    set -- "$@" -output_ts_offset "$timestamp_offset"
+    case "$chunk" in
+        *sk-video.cdn.beeldengeluid.nl*.m3u8*)
+            printf '%s\n' "$chunk" \
+                | sed \
+                    -e 's/^[[:space:]]*//' \
+                    -e 's/[[:space:]]*$//' \
+                    -e 's/\\u0026/\&/g' \
+                >>"$streams_file"
+            ;;
+    esac
+done <"$markers_file"
+
+[ -s "$streams_file" ] || fail "no signed HLS stream URL was found"
+
+while IFS= read -r signed_url; do
+    [ -n "$signed_url" ] || continue
+    case "$signed_url" in
+        https://sk-video.cdn.beeldengeluid.nl/*.m3u8\?*)
+            ;;
+        *)
+            fail "the Server Action returned an unexpected stream URL"
+            ;;
+    esac
+
+    base_url=${signed_url%%\?*}
+    query=${signed_url#*\?}
+    policy_raw=$(query_value "$query" CloudFront-Policy) \
+        || fail "the stream URL has no CloudFront-Policy"
+    signature_raw=$(query_value "$query" CloudFront-Signature) \
+        || fail "the stream URL has no CloudFront-Signature"
+    key_pair_id_raw=$(query_value "$query" CloudFront-Key-Pair-Id) \
+        || fail "the stream URL has no CloudFront-Key-Pair-Id"
+
+    policy=$(decode_cloudfront_value "$policy_raw")
+    signature=$(decode_cloudfront_value "$signature_raw")
+    key_pair_id=$(decode_cloudfront_value "$key_pair_id_raw")
+    cookie_header="Cookie: CloudFront-Policy=$policy; CloudFront-Signature=$signature; CloudFront-Key-Pair-Id=$key_pair_id"
+
     # Keep stdout media-only. ErsatzRS forwards it as video/mp2t.
-    "$ffmpeg_bin" "$@" -f mpegts pipe:1 \
-        || fail "FFmpeg could not stream the signed HLS source"
-done <"$plan_file"
+    if [ -n "$fragment_duration" ]; then
+        "$ffmpeg_bin" \
+            -nostdin -hide_banner -loglevel error \
+            -ss "$seek_position" -headers "$cookie_header" -i "$base_url" \
+            -t "$fragment_duration" -map 0:v:0? -map 0:a:0? \
+            -c copy -f mpegts pipe:1 \
+            || fail "FFmpeg could not stream the signed HLS fragment"
+    else
+        "$ffmpeg_bin" \
+            -nostdin -hide_banner -loglevel error \
+            -ss "$seek_position" -headers "$cookie_header" -i "$base_url" \
+            -map 0:v:0? -map 0:a:0? -c copy -f mpegts pipe:1 \
+            || fail "FFmpeg could not stream the signed HLS source"
+    fi
+done <"$streams_file"

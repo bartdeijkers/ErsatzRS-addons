@@ -171,32 +171,6 @@ function imageFromHtml(html: string): string | undefined {
   return undefined;
 }
 
-// A programme page opens with the shared Schatkamer social card and then shows
-// stills of neighbouring episodes, so the first picture in document order
-// belongs to something else. Two payloads name this programme: the player
-// publishes the poster it shows before playback, and the programme record
-// carries its still beside its own identity.
-function episodeImageFromHtml(
-  html: string,
-  episodeId: string,
-): string | undefined {
-  const poster = safeProviderImage(
-    html.match(
-      /"programStream"\s*:\s*\{[\s\S]{0,400}?"poster"\s*:\s*"([^"]+)"/i,
-    )?.[1],
-  );
-  if (poster) return poster;
-  if (!/^\d{1,64}$/.test(episodeId)) return undefined;
-  const record = html.match(
-    new RegExp(
-      `"id"\\s*:\\s*"${episodeId}"[^{}]*?` +
-        `"image"\\s*:\\s*\\{[^{}]*?"url"\\s*:\\s*"([^"]+)"`,
-      "i",
-    ),
-  )?.[1];
-  return safeProviderImage(record);
-}
-
 function dateFromHtml(html: string): string | undefined {
   const explicit = lastJsonString(html, "publishedAtISO") ??
     lastJsonString(html, "datePublished") ??
@@ -306,36 +280,26 @@ function extractOverviewItems(rawHtml: string): OverviewItem[] {
       },
     });
   }
-  // A provider record ends with the link it describes, so reading forward from
-  // that link reads the next episode's fields. Anchor on the record's own
-  // identity and accept it only when the link it introduces names that same
-  // episode; the series object wrapping a card carries an identity too.
-  const jsonRecord =
-    /"id"\s*:\s*"(?<id>\d{1,64})"(?<body>[\s\S]{0,2400}?)"url"\s*:\s*"https:\/\/schatkamer[.]beeldengeluid[.]nl(?<path>\/serie\/\d+\/[^"\/]+\/aflevering\/(?<pathId>\d{1,64}))"/gi;
-  let record = jsonRecord.exec(html);
-  while (record) {
-    const path = record.groups?.path;
-    if (path && record.groups?.id === record.groups?.pathId) {
-      const body = record.groups?.body ?? "";
-      const playableMatch = body.match(/"isPlayable"\s*:\s*(true|false)/i);
-      candidates.push({
-        index: record.index,
-        item: {
-          path,
-          title: lastJsonString(body, "title") ?? titleFromPath(path),
-          description: lastJsonString(body, "description"),
-          releaseDate: dateFromHtml(body),
-          image: imageFromHtml(body),
-          playable: playableMatch
-            ? playableMatch[1].toLocaleLowerCase() === "true"
-            : undefined,
-        },
-      });
-    } else {
-      // A rejected pairing must not hide the record that follows it.
-      jsonRecord.lastIndex = record.index + 1;
-    }
-    record = jsonRecord.exec(html);
+  const jsonUrl =
+    /"url"\s*:\s*"https:\/\/schatkamer[.]beeldengeluid[.]nl(?<path>\/serie\/\d+\/[^"\/]+\/aflevering\/\d+)"(?<tail>[\s\S]{0,1600}?)(?="url"\s*:|$)/gi;
+  for (const match of html.matchAll(jsonUrl)) {
+    const path = match.groups?.path;
+    if (!path) continue;
+    const tail = match.groups?.tail ?? "";
+    const playableMatch = tail.match(/"isPlayable"\s*:\s*(true|false)/i);
+    candidates.push({
+      index: match.index,
+      item: {
+        path,
+        title: lastJsonString(tail, "title") ?? titleFromPath(path),
+        description: lastJsonString(tail, "description"),
+        releaseDate: dateFromHtml(tail),
+        image: imageFromHtml(tail),
+        playable: playableMatch
+          ? playableMatch[1].toLocaleLowerCase() === "true"
+          : undefined,
+      },
+    });
   }
   candidates.sort((left, right) => left.index - right.index);
   const merged = new Map<string, OverviewItem>();
@@ -751,45 +715,6 @@ function peopleFromHtml(html: string): JsonObject[] {
   return result.slice(0, 1024);
 }
 
-// A programme that was archived across several analogue carriers publishes one
-// stream entry per part, and the episode runs as long as all of them together.
-// Only entries in that stream index carry a playout position, so pairing the
-// two fields selects the parts and ignores durations published elsewhere on
-// the page. A page without the index keeps its single duration.
-function episodeDuration(html: string): number | undefined {
-  const parts = [
-    ...html.matchAll(
-      /"durationNumber"\s*:\s*(\d+)\s*,\s*"playoutOrder"\s*:\s*\d+/gi,
-    ),
-  ].map((part) => Number(part[1]));
-  if (parts.length) {
-    // The archive also holds repeat digitisations of the same carrier. They
-    // are only recognisable by their nearly equal durations, so collapsing
-    // them is opt-in and must match what playback does; both keep the first
-    // copy of a group in playout order.
-    const tolerance = duplicateTolerance();
-    const kept: number[] = [];
-    for (const part of parts) {
-      if (
-        tolerance > 0 &&
-        kept.some((first) => Math.abs(first - part) <= tolerance)
-      ) {
-        continue;
-      }
-      kept.push(part);
-    }
-    return kept.reduce((total, part) => total + part, 0);
-  }
-  const single = html.match(/"durationNumber"\s*:\s*(\d+)/i);
-  return single ? Number(single[1]) : undefined;
-}
-
-function duplicateTolerance(): number {
-  const configured = Deno.env
-    .get("ERSATZRS_ADDON_SETTING_DUPLICATE_TOLERANCE_SECONDS")?.trim();
-  return configured && /^\d+$/.test(configured) ? Number(configured) : 0;
-}
-
 function fullItem(
   request: EnrichRequest,
   html: string,
@@ -807,12 +732,13 @@ function fullItem(
     text(object(baseline.metadata)?.plot);
   const releaseDate = dateFromHtml(normalized) ??
     text(object(baseline.metadata)?.release_date);
-  const duration = episodeDuration(normalized) ??
-    Number(baseline.duration_seconds);
+  const durationMatch = normalized.match(/"durationNumber"\s*:\s*(\d+)/i);
+  const duration = durationMatch
+    ? Number(durationMatch[1])
+    : Number(baseline.duration_seconds);
   const genres = jsonStrings(normalized, "genres");
   const tags = jsonStrings(normalized, "subjects");
-  const episodeId = request.provider_id.replace(/^episode:/, "");
-  const image = episodeImageFromHtml(normalized, episodeId) ??
+  const image = imageFromHtml(normalized) ??
     (Array.isArray(baseline.additional_image_urls)
       ? safeProviderImage(baseline.additional_image_urls[0])
       : undefined);
@@ -824,6 +750,7 @@ function fullItem(
     : age === "Leeftijdsadvies onbekend"
     ? "nl:unknown"
     : age;
+  const episodeId = request.provider_id.replace(/^episode:/, "");
   const collection = plainText(
     normalized.match(/href=["']\/zoeken[?]collectie=[^"']*["'][^>]*>([^<]*)/i)
       ?.[1] ?? "",

@@ -35,9 +35,7 @@ run_provider() {
 
 run_media_list_import() {
     export CURL_BIN=$curl_bin
-    if deno run --quiet \
-        --allow-env=CURL_BIN,ERSATZRS_ADDON_SETTING_DUPLICATE_TOLERANCE_SECONDS \
-        --allow-run \
+    if deno run --quiet --allow-env=CURL_BIN --allow-run \
         "$script_dir/libexec/media-list-import.ts" "$operation"
     then
         return 0
@@ -48,7 +46,7 @@ run_media_list_import() {
 }
 
 check() {
-    for program in "$FFMPEG_BIN" "$curl_bin" awk grep sed mktemp deno; do
+    for program in "$FFMPEG_BIN" "$curl_bin" awk grep dd sed mktemp deno; do
         if ! have_program "$program"; then
             printf '%s\n' '{"status":"unavailable","code":"missing-command","message":"A required executable is unavailable."}'
             exit 0

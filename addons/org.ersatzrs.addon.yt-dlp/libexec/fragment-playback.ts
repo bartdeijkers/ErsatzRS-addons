@@ -36,7 +36,24 @@ const command = new Deno.Command(ytDlp, {
     // FFmpeg downloader is refused when it fetches that URL itself; the
     // manifest formats carry no such binding. The progressive renditions stay
     // as fallbacks for sources that publish nothing else.
-    "--format", "best[protocol^=m3u8][vcodec!=none][acodec!=none]/best[ext=mp4][vcodec*=avc1][acodec*=mp4a]/best[acodec!=none][vcodec!=none]",
+    //
+    // The manifest legs pair a video-only with an audio-only rendition instead
+    // of asking for one combined stream. Providers are dropping muxed
+    // renditions: YouTube now publishes its manifest and progressive formats
+    // as separate video-only and audio-only entries, so every combined
+    // selector fails outright with "Requested format is not available" and the
+    // add-on cannot play anything. yt-dlp merges the pair through the managed
+    // FFmpeg runtime, and --hls-use-mpegts keeps that merge streamable to
+    // stdout. Preferring avc1 keeps the consumer pipeline off the VP9 rendition
+    // the provider marks Premium. The combined legs stay behind them for the
+    // sources that still publish one.
+    "--format", [
+      "bestvideo[protocol^=m3u8][vcodec^=avc1]+bestaudio[protocol^=m3u8]",
+      "bestvideo[protocol^=m3u8]+bestaudio[protocol^=m3u8]",
+      "best[protocol^=m3u8][vcodec!=none][acodec!=none]",
+      "best[ext=mp4][vcodec*=avc1][acodec*=mp4a]",
+      "best[acodec!=none][vcodec!=none]",
+    ].join("/"),
     "--output", "-",
     url.toString(),
   ],

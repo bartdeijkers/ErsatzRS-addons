@@ -1299,10 +1299,25 @@ exit 0
             # A progressive rendition is served from a client-bound media URL
             # that the managed FFmpeg downloader is refused when it fetches the
             # URL itself, so an adaptive manifest has to be preferred.
-            selector = next(value for value in values if value.startswith("best["))
+            selector = values[values.index("--format") + 1]
+            legs = selector.split("/")
             self.assertTrue(
-                selector.startswith("best[protocol^=m3u8]"),
+                legs[0].startswith("bestvideo[protocol^=m3u8]"),
                 f"manifest formats must be preferred, got {selector}",
+            )
+            # Providers are dropping muxed renditions: YouTube publishes only
+            # video-only and audio-only entries, so a selector whose legs all
+            # demand one combined stream resolves to nothing and playback dies
+            # with "Requested format is not available". At least one leg has to
+            # pair a video with an audio rendition, and those legs come first.
+            merged = [index for index, leg in enumerate(legs) if "+" in leg]
+            self.assertTrue(
+                merged, f"a video+audio merge leg is required, got {selector}"
+            )
+            combined = [index for index, leg in enumerate(legs) if "+" not in leg]
+            self.assertTrue(
+                not combined or max(merged) < min(combined),
+                f"merge legs must precede combined-only legs, got {selector}",
             )
 
     def test_yt_dlp_declares_its_javascript_runtime_on_both_platforms(self) -> None:

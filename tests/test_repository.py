@@ -6,8 +6,10 @@ import pathlib
 import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
+import zipfile
 
 try:
     import tomllib
@@ -39,6 +41,56 @@ BEELDENGELUID_EPISODE_URL = (
 )
 
 class RepositoryTests(unittest.TestCase):
+    def test_local_repository_manifest_and_layout(self) -> None:
+        repository = tomllib.loads(
+            (ROOT / "repository.toml").read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            set(repository), {"schema_version", "id", "name", "description"}
+        )
+        self.assertEqual(repository["schema_version"], 1)
+        self.assertEqual(repository["id"], "org.ersatzrs.repository.official")
+        self.assertTrue(repository["name"].strip())
+        self.assertTrue(repository["description"]["en-US"].strip())
+
+        addon_directories = sorted(path for path in (ROOT / "addons").iterdir() if path.is_dir())
+        self.assertGreater(len(addon_directories), 0)
+        for addon_directory in addon_directories:
+            manifest = tomllib.loads(
+                (addon_directory / "addon.toml").read_text(encoding="utf-8")
+            )
+            self.assertEqual(manifest["id"], addon_directory.name)
+
+    def test_repository_bundle_build_script(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            output = pathlib.Path(temporary) / "ErsatzRS-addons.zip"
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(ROOT / "tools" / "build_repository_bundle.py"),
+                    "--output",
+                    str(output),
+                ],
+                cwd=ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue(output.is_file())
+            with zipfile.ZipFile(output) as archive:
+                names = set(archive.namelist())
+                self.assertIn("repository.toml", names)
+                self.assertIn(
+                    "addons/org.ersatzrs.addon.beeldengeluid/addon.toml", names
+                )
+                self.assertIn("addons/org.ersatzrs.addon.yt-dlp/addon.toml", names)
+                self.assertNotIn("README.md", names)
+                shell = archive.getinfo(
+                    "addons/org.ersatzrs.addon.beeldengeluid/addon.sh"
+                )
+                self.assertNotEqual((shell.external_attr >> 16) & 0o111, 0)
+
     def final_operation_error(self, result: subprocess.CompletedProcess[str]) -> dict[str, str]:
         self.assertNotEqual(result.returncode, 0)
         payload = json.loads(result.stderr.splitlines()[-1])

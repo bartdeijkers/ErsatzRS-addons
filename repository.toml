@@ -1,0 +1,6 @@
+schema_version = 1
+id = "org.ersatzrs.repository.official"
+name = "Official ErsatzRS add-ons"
+
+[description]
+"en-US" = "Official add-ons maintained for ErsatzRS"

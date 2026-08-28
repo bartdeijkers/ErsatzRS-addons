@@ -1,0 +1,74 @@
+# Build and test the repository
+
+Run all commands from the repository root. The offline-bundle builder uses only
+the Python standard library and works on Linux and Windows.
+
+## Build the offline bundle
+
+Linux:
+
+```sh
+python3 tools/build_repository_bundle.py
+```
+
+Windows PowerShell or Command Prompt:
+
+```powershell
+py -3 tools/build_repository_bundle.py
+```
+
+The default output is `dist/ErsatzRS-addons.zip`. Select another location with
+`--output <path>`:
+
+```sh
+python3 tools/build_repository_bundle.py --output dist/candidate.zip
+```
+
+The script packages the current working tree, including uncommitted add-on or
+manifest changes. Build releases only from the intended clean release commit.
+
+## Run the cross-platform tests
+
+Linux:
+
+```sh
+python3 -m unittest discover -s tests
+```
+
+Windows:
+
+```powershell
+py -3 -m unittest discover -s tests
+```
+
+Install Deno before running the complete provider-adapter coverage. Some
+platform- or runtime-specific cases are skipped when their declared external
+runtime is unavailable.
+
+## Validate manifests on Linux x86-64
+
+The checked-in host validator is a Linux x86-64 binary. Verify its digest from
+its own directory, then validate every add-on manifest:
+
+```sh
+(cd tools/validator && sha256sum --check SHA256SUMS)
+tools/validator/ersatzrs-addon-validator-x86_64-unknown-linux-gnu \
+  addons/*/addon.toml
+```
+
+The Python repository tests validate `repository.toml` and the local repository
+layout on both Linux and Windows.
+
+## Inspect the result
+
+Test the ZIP with Python on either platform:
+
+```sh
+python3 -m zipfile -t dist/ErsatzRS-addons.zip
+```
+
+On Windows, replace `python3` with `py -3`. The builder prints the archive's
+SHA-256 digest. Rebuilding an unchanged working tree produces the same bytes.
+
+The [repository layout reference](../reference/repository-layout.md) describes
+the entries and invariants enforced by the builder.

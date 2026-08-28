@@ -1,20 +1,12 @@
-name: Publish signed add-on repository
+name: Validate and bundle private add-on repository
 
 on:
-  push:
-    branches: [main]
-  schedule:
-    - cron: "17 3 */14 * *"
+  release:
+    types: [published]
   workflow_dispatch:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
-
-concurrency:
-  group: pages
-  cancel-in-progress: false
 
 jobs:
   windows-entrypoint-tests:
@@ -30,23 +22,15 @@ jobs:
       - name: Test native Windows entrypoints
         run: python -m unittest discover -s tests
 
-  publish:
+  validate-and-bundle:
     needs: windows-entrypoint-tests
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@1.97.1
-      # The yt-dlp package runs its metadata and playback helpers on deno.
-      # Without it the entrypoint tests covering those paths skip silently
-      # instead of failing, so the runtime must be present for the suite to
-      # mean anything.
       - uses: denoland/setup-deno@v2
         with:
           deno-version: v2.x
-      - name: Verify and run the pinned host contract validator
+      - name: Validate manifests and provider adapters
         run: |
           cd tools/validator
           sha256sum --check SHA256SUMS
@@ -60,30 +44,27 @@ jobs:
           tools/validator/ersatzrs-addon-validator-x86_64-unknown-linux-gnu \
             --kind media-list-output \
             "$RUNNER_TEMP/beeldengeluid-media-list.ndjson"
-      - name: Test repository tooling and entrypoints
-        run: |
-          cargo test --locked
           python3 -m unittest discover -s tests
-      - name: Build packages and unsigned index
-        run: >-
-          cargo run --locked --package repository-publisher --
-          --sequence "${GITHUB_RUN_NUMBER}"
-          --base-url https://bartdeijkers.github.io/ErsatzRS-addons
-          --output dist
-          --validator tools/validator/ersatzrs-addon-validator-x86_64-unknown-linux-gnu
-      - name: Sign exact catalog bytes
-        env:
-          SIGNING_KEY_PEM: ${{ secrets.ADDON_REPOSITORY_SIGNING_KEY_PEM }}
-        run: |
-          test -n "$SIGNING_KEY_PEM"
-          umask 077
-          install -m 600 /dev/null "$RUNNER_TEMP/addon-repository-signing-key.pem"
-          printf '%s' "$SIGNING_KEY_PEM" > "$RUNNER_TEMP/addon-repository-signing-key.pem"
-          tools/sign_catalog.sh "$RUNNER_TEMP/addon-repository-signing-key.pem" dist/index-v1.json dist/index-v1.json.sig
-      - uses: actions/configure-pages@v6
-      - uses: actions/upload-pages-artifact@v5
+      - name: Build complete offline repository bundle
+        run: python3 tools/build_repository_bundle.py
+      - uses: actions/upload-artifact@v4
         with:
+          name: ErsatzRS-addons
+          path: dist/ErsatzRS-addons.zip
+          if-no-files-found: error
+
+  publish-release:
+    if: github.event_name == 'release'
+    needs: validate-and-bundle
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          name: ErsatzRS-addons
           path: dist
-      - name: Deploy GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v5
+      - name: Attach bundle to GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" dist/ErsatzRS-addons.zip --clobber

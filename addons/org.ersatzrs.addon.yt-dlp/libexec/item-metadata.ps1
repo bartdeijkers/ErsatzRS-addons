@@ -10,7 +10,7 @@ function Chapter-Time([long]$seconds) {
 
 foreach ($itemId in @($env:ERSATZRS_REMOTE_STREAM_ITEM_IDS -split "`r?`n")) {
     if (-not $itemId -or $itemId -match '["\\]' -or $itemId.StartsWith('-')) { continue }
-    $json = & $env:YT_DLP_BIN --no-config --no-update --quiet --no-playlist --skip-download --dump-single-json ('https://www.youtube.com/watch?v=' + $itemId)
+    $json = & $env:YT_DLP_BIN --no-config --no-update --cache-dir $env:YT_DLP_CACHE_DIR --quiet --no-playlist --skip-download --dump-single-json ('https://www.youtube.com/watch?v=' + $itemId)
     if ($LASTEXITCODE -ne 0) { continue }
     $item = $json | ConvertFrom-Json
     $availability = switch ([string]$item.availability) {

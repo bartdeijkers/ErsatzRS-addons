@@ -30,6 +30,11 @@ directory added to its own `PATH`.
 Video is streamed straight through ErsatzRS for immediate playback; no
 permanent file is written.
 
+yt-dlp's reusable client and signature cache is stored in the host-provided
+add-on cache directory. The installed package remains immutable, including on
+Windows where the host deliberately does not expose an operator home directory
+to the child process.
+
 The add-on can enumerate public playlists and individual public video links
 through **Media Sources > Add-on Lists**. A direct video becomes a one-item
 list, with live and finite state retained from yt-dlp; playlist entries retain

@@ -1129,6 +1129,120 @@ exit 0
         self.assertNotIn("record_type", result.stdout)
         self.assertTrue(result.stdout.strip())
 
+    @unittest.skipUnless(
+        os.name == "nt" or pathlib.Path("/bin/sh").exists(),
+        "native Windows or POSIX shell required",
+    )
+    def test_yt_dlp_cache_writes_leave_the_installed_package_immutable(self) -> None:
+        playlist = (
+            '{"title":"Fixture playlist","entries":[{'
+            '"id":"video-1","title":"One",'
+            '"webpage_url":"https://video.example/watch?v=1",'
+            '"availability":"public"}]}'
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            package = root / "installed-package"
+            shutil.copytree(
+                ROOT / "addons" / "org.ersatzrs.addon.yt-dlp", package
+            )
+            cache = root / "managed cache"
+            if os.name == "nt":
+                fake = root / "fake-yt-dlp.cmd"
+                fake.write_text(
+                    "@echo off\n"
+                    "set \"CACHE_DIR=\"\n"
+                    ":parse\n"
+                    "if \"%~1\"==\"\" goto :parsed\n"
+                    "if /i \"%~1\"==\"--cache-dir\" goto :cache\n"
+                    "shift\n"
+                    "goto :parse\n"
+                    ":cache\n"
+                    "shift\n"
+                    "set \"CACHE_DIR=%~1\"\n"
+                    "shift\n"
+                    "goto :parse\n"
+                    ":parsed\n"
+                    "if not defined CACHE_DIR set \"CACHE_DIR=~\\.cache\\yt-dlp\"\n"
+                    "mkdir \"%CACHE_DIR%\" >nul 2>&1\n"
+                    "> \"%CACHE_DIR%\\sentinel.json\" echo {}\n"
+                    f"echo {playlist}\n",
+                    encoding="utf-8",
+                )
+                command = [
+                    os.environ.get("COMSPEC", "cmd.exe"),
+                    "/d",
+                    "/c",
+                    str(package / "addon.bat"),
+                    "list",
+                ]
+            else:
+                fake = root / "fake-yt-dlp"
+                fake.write_text(
+                    "#!/bin/sh\n"
+                    "cache=\n"
+                    "while [ \"$#\" -gt 0 ]; do\n"
+                    "    if [ \"$1\" = \"--cache-dir\" ]; then\n"
+                    "        shift\n"
+                    "        cache=$1\n"
+                    "    fi\n"
+                    "    shift\n"
+                    "done\n"
+                    "[ -n \"$cache\" ] || cache='./~/.cache/yt-dlp'\n"
+                    "mkdir -p \"$cache\"\n"
+                    "printf '{}\\n' > \"$cache/sentinel.json\"\n"
+                    f"printf '%s\\n' '{playlist}'\n",
+                    encoding="utf-8",
+                )
+                fake.chmod(0o755)
+                command = ["/bin/sh", str(package / "addon.sh"), "list"]
+            before = {
+                path.relative_to(package): path.read_bytes()
+                for path in package.rglob("*")
+                if path.is_file()
+            }
+            environment = os.environ.copy()
+            environment.update(
+                {
+                    "ERSATZRS_ADDON_CACHE_DIR": str(cache),
+                    "ERSATZRS_ADDON_SETTING_YT_DLP_BIN": str(fake),
+                    "ERSATZRS_REMOTE_STREAM_PLAYLIST_URL": (
+                        "https://video.example/playlist"
+                    ),
+                }
+            )
+            result = subprocess.run(
+                command,
+                cwd=package,
+                check=False,
+                capture_output=True,
+                text=True,
+                env=environment,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            after = {
+                path.relative_to(package): path.read_bytes()
+                for path in package.rglob("*")
+                if path.is_file()
+            }
+            self.assertEqual(after, before)
+            self.assertEqual((cache / "sentinel.json").read_text(), "{}\n")
+
+    def test_every_yt_dlp_provider_invocation_routes_the_host_cache(self) -> None:
+        addon = ROOT / "addons" / "org.ersatzrs.addon.yt-dlp"
+        for relative in [
+            "addon.sh",
+            "libexec/media-list-import.ts",
+            "libexec/fragment-playback.ts",
+            "libexec/item-metadata.ps1",
+            "libexec/youtube-list.ps1",
+            "libexec/youtube.bat",
+        ]:
+            with self.subTest(relative=relative):
+                source = (addon / relative).read_text(encoding="utf-8")
+                self.assertIn("YT_DLP_CACHE_DIR", source)
+                self.assertIn("--cache-dir", source)
+
     @unittest.skipUnless(pathlib.Path("/bin/sh").exists(), "POSIX shell required")
     def test_posix_operations_emit_structured_final_stderr_lines(self) -> None:
         for addon_id, extra in [
@@ -1273,6 +1387,7 @@ exit 0
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)
             arguments = root / "arguments"
+            cache = root / "managed cache"
             fake = root / "yt-dlp"
             fake.write_text(
                 "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$ARGUMENTS\"\n",
@@ -1287,12 +1402,14 @@ exit 0
                     **os.environ,
                     "ARGUMENTS": str(arguments),
                     "YT_DLP_BIN": str(fake),
+                    "YT_DLP_CACHE_DIR": str(cache),
                     "FFMPEG_BIN": "/managed/ffmpeg",
                     "ERSATZRS_REMOTE_STREAM_URL": "https://video.example/watch?v=1&start=20&end=65",
                     "ERSATZRS_REMOTE_STREAM_SEEK": "00:00:05",
                 },
             )
             values = arguments.read_text(encoding="utf-8").splitlines()
+            self.assertEqual(values[values.index("--cache-dir") + 1], str(cache))
             self.assertIn("ffmpeg_i:-ss 25 -t 40", values)
             self.assertIn("https://video.example/watch?v=1", values)
             self.assertFalse(any("start=" in value or "end=" in value for value in values))
@@ -2307,6 +2424,7 @@ printf '%s\n' '{"title":"Fixture playlist","description":"Fixture list descripti
         addon_root = ROOT / "addons" / "org.ersatzrs.addon.yt-dlp"
         with tempfile.TemporaryDirectory() as temporary:
             fixtures = pathlib.Path(temporary)
+            cache = fixtures / "managed cache"
             playlist = fixtures / "playlist.json"
             playlist.write_text(
                 '{"id":"playlist-1","title":"Fixture playlist",'
@@ -2364,6 +2482,7 @@ printf '%s\n' '{"title":"Fixture playlist","description":"Fixture list descripti
                 {
                     "YT_DLP_BIN": str(fake),
                     "ERSATZRS_ADDON_SETTING_YT_DLP_BIN": str(fake),
+                    "ERSATZRS_ADDON_CACHE_DIR": str(cache),
                     "FAKE_CALLS": str(calls),
                     "FAKE_FIXTURE": str(playlist),
                 }
@@ -2398,6 +2517,8 @@ printf '%s\n' '{"title":"Fixture playlist","description":"Fixture list descripti
             discovery_calls = calls.read_text(encoding="utf-8").splitlines()
             self.assertEqual(len(discovery_calls), 1)
             self.assertIn("--flat-playlist", discovery_calls[0])
+            self.assertIn("--cache-dir", discovery_calls[0])
+            self.assertIn(str(cache), discovery_calls[0])
 
             environment["FAKE_FIXTURE"] = str(detail)
             enrich_request = {
@@ -2422,6 +2543,8 @@ printf '%s\n' '{"title":"Fixture playlist","description":"Fixture list descripti
             self.assertEqual(detail_rows[1]["metadata"]["release_date"], "2024-08-22")
             all_calls = calls.read_text(encoding="utf-8").splitlines()
             self.assertEqual(len(all_calls), 2)
+            self.assertTrue(all("--cache-dir" in call for call in all_calls))
+            self.assertTrue(all(str(cache) in call for call in all_calls))
             self.assertNotIn("--flat-playlist", all_calls[1])
             self.assertIn("--no-playlist", all_calls[1])
             self.assertIn("watch?v=video-1", all_calls[1])

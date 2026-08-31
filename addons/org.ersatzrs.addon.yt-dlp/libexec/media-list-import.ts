@@ -25,6 +25,16 @@ const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const ytDlp = Deno.env.get("YT_DLP_BIN")?.trim() || "yt-dlp";
 
+function requiredEnvironment(name: string): string {
+  const value = Deno.env.get(name)?.trim();
+  if (!value) {
+    throw new Error(`the ${name} environment variable is unavailable`);
+  }
+  return value;
+}
+
+const ytDlpCacheDir = requiredEnvironment("YT_DLP_CACHE_DIR");
+
 function object(value: unknown): JsonObject | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? value as JsonObject
@@ -251,7 +261,7 @@ function providerItem(
 async function runProvider(arguments_: string[]): Promise<ProviderResult> {
   try {
     const result = await new Deno.Command(ytDlp, {
-      args: arguments_,
+      args: ["--cache-dir", ytDlpCacheDir, ...arguments_],
       stdin: "null",
       stdout: "piped",
       stderr: "piped",

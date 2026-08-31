@@ -19,6 +19,14 @@ if not defined FFMPEG_BIN (
     exit /b 69
 )
 
+set "YT_DLP_CACHE_DIR=%ERSATZRS_ADDON_CACHE_DIR%"
+if not defined YT_DLP_CACHE_DIR if defined TEMP set "YT_DLP_CACHE_DIR=%TEMP%\ersatzrs-yt-dlp-cache"
+if not defined YT_DLP_CACHE_DIR if defined TMP set "YT_DLP_CACHE_DIR=%TMP%\ersatzrs-yt-dlp-cache"
+if not defined YT_DLP_CACHE_DIR (
+    >&2 echo youtube.bat: the add-on cache directory is unavailable
+    exit /b 70
+)
+
 if defined YT_DLP_BIN goto :yt_dlp_ready
 if exist "%~dp0yt-dlp.exe" set "YT_DLP_BIN=%~dp0yt-dlp.exe"
 if defined YT_DLP_BIN goto :yt_dlp_ready
@@ -47,6 +55,7 @@ rem ffmpeg_i places the seek before the remote input is opened.
 "%YT_DLP_BIN%" ^
     --no-config ^
     --no-update ^
+    --cache-dir "%YT_DLP_CACHE_DIR%" ^
     --quiet ^
     --no-playlist ^
     --ffmpeg-location "%FFMPEG_BIN%" ^

@@ -4,6 +4,10 @@ setlocal DisableDelayedExpansion
 set "OPERATION=%~1"
 set "YT_DLP_BIN=%ERSATZRS_ADDON_SETTING_YT_DLP_BIN%"
 if not defined YT_DLP_BIN set "YT_DLP_BIN=yt-dlp.exe"
+set "YT_DLP_CACHE_DIR=%ERSATZRS_ADDON_CACHE_DIR%"
+if not defined YT_DLP_CACHE_DIR if defined TEMP set "YT_DLP_CACHE_DIR=%TEMP%\ersatzrs-yt-dlp-cache"
+if not defined YT_DLP_CACHE_DIR if defined TMP set "YT_DLP_CACHE_DIR=%TMP%\ersatzrs-yt-dlp-cache"
+if not defined YT_DLP_CACHE_DIR goto :missing_cache
 
 if /i "%OPERATION%"=="check" goto :check
 if /i "%OPERATION%"=="discover" goto :media_list_import
@@ -31,7 +35,7 @@ call :require_program "%YT_DLP_BIN%"
 if errorlevel 1 goto :missing
 call :require_program "deno.exe"
 if errorlevel 1 goto :missing_js_runtime
-deno.exe run --quiet --allow-env=YT_DLP_BIN --allow-run "%~dp0libexec\media-list-import.ts" "%OPERATION%"
+deno.exe run --quiet --allow-env=YT_DLP_BIN,YT_DLP_CACHE_DIR --allow-run "%~dp0libexec\media-list-import.ts" "%OPERATION%"
 if errorlevel 1 goto :provider_failed
 exit /b 0
 
@@ -94,6 +98,10 @@ exit /b 64
 :missing_item_ids
 call :fail missing-setting "At least one item identity is required." 64
 exit /b 64
+
+:missing_cache
+call :fail operation-failed "The add-on cache directory is unavailable." 70
+exit /b 70
 
 :fail
 >&2 echo {"code":"%~1","message":"%~2"}

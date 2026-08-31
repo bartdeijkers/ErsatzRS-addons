@@ -40,14 +40,14 @@ try {
     $uri = [Uri]$env:PLAYLIST_URL
     if ($uri.Scheme -notin @('http', 'https')) { throw 'playlist URL must use HTTP or HTTPS' }
     if ($env:MEDIA_LIST_MODE -eq '1') {
-        $json = & $env:YT_DLP_BIN --no-config --no-update --quiet --skip-download --ignore-errors --dump-single-json $env:PLAYLIST_URL
+        $json = & $env:YT_DLP_BIN --no-config --no-update --cache-dir $env:YT_DLP_CACHE_DIR --quiet --skip-download --ignore-errors --dump-single-json $env:PLAYLIST_URL
         if ($LASTEXITCODE -ne 0) { throw 'yt-dlp could not extract the playlist metadata' }
         $transformer = Join-Path $PSScriptRoot 'media-list.ts'
         $json | & deno.exe run --quiet --allow-env=ERSATZRS_MEDIA_LIST_URL,PLAYLIST_URL $transformer
         if ($LASTEXITCODE -ne 0) { throw 'yt-dlp playlist metadata was invalid' }
         exit 0
     }
-    $json = & $env:YT_DLP_BIN --no-config --no-update --quiet --flat-playlist --dump-single-json $env:PLAYLIST_URL
+    $json = & $env:YT_DLP_BIN --no-config --no-update --cache-dir $env:YT_DLP_CACHE_DIR --quiet --flat-playlist --dump-single-json $env:PLAYLIST_URL
     if ($LASTEXITCODE -ne 0) { throw 'yt-dlp could not enumerate the playlist' }
     $playlist = $json | ConvertFrom-Json
     $entries = @($playlist.entries)

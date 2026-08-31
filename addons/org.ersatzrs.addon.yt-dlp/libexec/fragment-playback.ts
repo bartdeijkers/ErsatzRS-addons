@@ -9,8 +9,11 @@ function seconds(value: string): number {
 
 const source = Deno.env.get("ERSATZRS_REMOTE_STREAM_URL");
 const ytDlp = Deno.env.get("YT_DLP_BIN");
+const ytDlpCacheDir = Deno.env.get("YT_DLP_CACHE_DIR");
 const ffmpeg = Deno.env.get("FFMPEG_BIN");
-if (!source || !ytDlp || !ffmpeg) throw new Error("the playback environment is incomplete");
+if (!source || !ytDlp || !ytDlpCacheDir || !ffmpeg) {
+  throw new Error("the playback environment is incomplete");
+}
 
 const url = new URL(source);
 const fragmentStart = url.searchParams.has("start") ? seconds(url.searchParams.get("start")!) : 0;
@@ -26,10 +29,18 @@ if (fragmentEnd !== undefined) downloaderArgs.push(`-t ${fragmentEnd - absoluteS
 
 const command = new Deno.Command(ytDlp, {
   args: [
-    "--no-config", "--no-update", "--quiet", "--no-playlist",
-    "--ffmpeg-location", ffmpeg,
-    "--downloader", "ffmpeg",
-    "--downloader-args", `ffmpeg_i:${downloaderArgs.join(" ")}`,
+    "--no-config",
+    "--no-update",
+    "--cache-dir",
+    ytDlpCacheDir,
+    "--quiet",
+    "--no-playlist",
+    "--ffmpeg-location",
+    ffmpeg,
+    "--downloader",
+    "ffmpeg",
+    "--downloader-args",
+    `ffmpeg_i:${downloaderArgs.join(" ")}`,
     "--hls-use-mpegts",
     // Prefer an adaptive manifest. A progressive rendition is served from a
     // media URL bound to the requesting player client, which the managed

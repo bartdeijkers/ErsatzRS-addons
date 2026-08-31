@@ -5,6 +5,9 @@ set -f
 
 operation=${1:-}
 yt_dlp=${ERSATZRS_ADDON_SETTING_YT_DLP_BIN:-yt-dlp}
+yt_dlp_cache_dir=${ERSATZRS_ADDON_CACHE_DIR:-${TMPDIR:-/tmp}/ersatzrs-yt-dlp-cache}
+YT_DLP_CACHE_DIR=$yt_dlp_cache_dir
+export YT_DLP_CACHE_DIR
 js_runtime=deno
 case $0 in
     */*) script_dir=${0%/*} ;;
@@ -30,6 +33,7 @@ enumerate_playlist() {
     if "$yt_dlp" \
         --no-config \
         --no-update \
+        --cache-dir "$yt_dlp_cache_dir" \
         --quiet \
         --flat-playlist \
         --output-na-placeholder null \
@@ -66,6 +70,7 @@ enumerate_media_list() {
     if "$yt_dlp" \
         --no-config \
         --no-update \
+        --cache-dir "$yt_dlp_cache_dir" \
         --quiet \
         --skip-download \
         --ignore-errors \
@@ -84,7 +89,7 @@ enumerate_media_list() {
 run_media_list_import() {
     YT_DLP_BIN=$yt_dlp
     export YT_DLP_BIN
-    if deno run --quiet --allow-env=YT_DLP_BIN --allow-run \
+    if deno run --quiet --allow-env=YT_DLP_BIN,YT_DLP_CACHE_DIR --allow-run \
         "$script_dir/libexec/media-list-import.ts" "$operation"
     then
         return 0
@@ -148,6 +153,7 @@ case "$operation" in
             | "$yt_dlp" \
                 --no-config \
                 --no-update \
+                --cache-dir "$yt_dlp_cache_dir" \
                 --quiet \
                 --no-playlist \
                 --ignore-errors \

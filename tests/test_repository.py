@@ -41,6 +41,13 @@ BEELDENGELUID_EPISODE_URL = (
 )
 
 class RepositoryTests(unittest.TestCase):
+    def setUp(self) -> None:
+        if (
+            "beeldengeluid" in self._testMethodName
+            and not (ROOT / "addons" / "org.ersatzrs.addon.beeldengeluid").is_dir()
+        ):
+            self.skipTest("Beeld & Geluid is not part of this repository")
+
     def test_local_repository_manifest_and_layout(self) -> None:
         repository = tomllib.loads(
             (ROOT / "repository.toml").read_text(encoding="utf-8")
@@ -81,13 +88,10 @@ class RepositoryTests(unittest.TestCase):
             with zipfile.ZipFile(output) as archive:
                 names = set(archive.namelist())
                 self.assertIn("repository.toml", names)
-                self.assertIn(
-                    "addons/org.ersatzrs.addon.beeldengeluid/addon.toml", names
-                )
                 self.assertIn("addons/org.ersatzrs.addon.yt-dlp/addon.toml", names)
                 self.assertNotIn("README.md", names)
                 shell = archive.getinfo(
-                    "addons/org.ersatzrs.addon.beeldengeluid/addon.sh"
+                    "addons/org.ersatzrs.addon.yt-dlp/addon.sh"
                 )
                 self.assertNotEqual((shell.external_attr >> 16) & 0o111, 0)
 
@@ -1007,10 +1011,6 @@ exit 0
             runtime.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
             runtime.chmod(0o755)
             for addon_id, extra in [
-                (
-                    "org.ersatzrs.addon.beeldengeluid",
-                    {"ERSATZRS_ADDON_SETTING_CURL_BIN": "/bin/true"},
-                ),
                 ("org.ersatzrs.addon.yt-dlp", {"ERSATZRS_ADDON_SETTING_YT_DLP_BIN": "/bin/true"}),
             ]:
                 environment = {
@@ -1246,7 +1246,6 @@ exit 0
     @unittest.skipUnless(pathlib.Path("/bin/sh").exists(), "POSIX shell required")
     def test_posix_operations_emit_structured_final_stderr_lines(self) -> None:
         for addon_id, extra in [
-            ("org.ersatzrs.addon.beeldengeluid", {"ERSATZRS_ADDON_SETTING_CURL_BIN": "/bin/true"}),
             ("org.ersatzrs.addon.yt-dlp", {"ERSATZRS_ADDON_SETTING_YT_DLP_BIN": "/bin/true"}),
         ]:
             result = subprocess.run(
@@ -1277,10 +1276,7 @@ exit 0
         self.assertEqual(self.final_operation_error(result)["code"], "provider-unreachable")
 
     def test_windows_entrypoints_declare_structured_operation_codes(self) -> None:
-        for addon_id in [
-            "org.ersatzrs.addon.beeldengeluid",
-            "org.ersatzrs.addon.yt-dlp",
-        ]:
+        for addon_id in ["org.ersatzrs.addon.yt-dlp"]:
             source = (ROOT / "addons" / addon_id / "addon.bat").read_text(encoding="utf-8")
             for code in ["missing-setting", "provider-unreachable", "operation-failed"]:
                 self.assertIn(code, source)
@@ -1417,6 +1413,7 @@ exit 0
             # that the managed FFmpeg downloader is refused when it fetches the
             # URL itself, so an adaptive manifest has to be preferred.
             selector = values[values.index("--format") + 1]
+            self.assertIn("[height<=1080]", selector)
             legs = selector.split("/")
             self.assertTrue(
                 legs[0].startswith("bestvideo[protocol^=m3u8]"),
@@ -1436,6 +1433,46 @@ exit 0
                 not combined or max(merged) < min(combined),
                 f"merge legs must precede combined-only legs, got {selector}",
             )
+
+            subprocess.run(
+                ["deno", "run", "--quiet", "--allow-env", "--allow-run", str(script)],
+                check=True,
+                env={
+                    **os.environ,
+                    "ARGUMENTS": str(arguments),
+                    "YT_DLP_BIN": str(fake),
+                    "YT_DLP_CACHE_DIR": str(cache),
+                    "FFMPEG_BIN": "/managed/ffmpeg",
+                    "ERSATZRS_REMOTE_STREAM_URL": "https://video.example/watch?v=1",
+                    "ERSATZRS_REMOTE_STREAM_SEEK": "0",
+                    "ERSATZRS_REMOTE_STREAM_MAX_VIDEO_HEIGHT": "720",
+                },
+            )
+            fallback_values = arguments.read_text(encoding="utf-8").splitlines()
+            self.assertNotIn("--downloader-args", fallback_values)
+            fallback_selector = fallback_values[fallback_values.index("--format") + 1]
+            self.assertIn("[height<=720]", fallback_selector)
+
+    @unittest.skipUnless(shutil.which("deno"), "Deno required")
+    def test_fragment_playback_rejects_invalid_video_height(self) -> None:
+        script = ROOT / "addons" / "org.ersatzrs.addon.yt-dlp" / "libexec" / "fragment-playback.ts"
+        result = subprocess.run(
+            ["deno", "run", "--quiet", "--allow-env", "--allow-run", str(script)],
+            check=False,
+            capture_output=True,
+            text=True,
+            env={
+                **os.environ,
+                "YT_DLP_BIN": shutil.which("true") or "/bin/true",
+                "YT_DLP_CACHE_DIR": tempfile.gettempdir(),
+                "FFMPEG_BIN": "/managed/ffmpeg",
+                "ERSATZRS_REMOTE_STREAM_URL": "https://video.example/watch?v=1",
+                "ERSATZRS_REMOTE_STREAM_SEEK": "0",
+                "ERSATZRS_REMOTE_STREAM_MAX_VIDEO_HEIGHT": "wide",
+            },
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("maximum video height is invalid", result.stderr)
 
     def test_yt_dlp_declares_its_javascript_runtime_on_both_platforms(self) -> None:
         manifest = tomllib.loads(
@@ -1734,6 +1771,7 @@ exit 0
                 "remote-stream.list.v1",
                 "remote-stream.list.v2",
                 "remote-stream.play.v1",
+                "remote-stream.play.v2",
             }
             <= {item["id"] for item in manifest["capabilities"]}
         )

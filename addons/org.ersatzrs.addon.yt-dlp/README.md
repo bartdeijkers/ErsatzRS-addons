@@ -30,6 +30,12 @@ directory added to its own `PATH`.
 Video is streamed straight through ErsatzRS for immediate playback; no
 permanent file is written.
 
+For live HLS playback, play contract v2 accepts a host-selected maximum video
+height. ErsatzRS normally requests up to 1080p and can temporarily retry at
+720p when measured segment delivery cannot keep pace with wall time. The bound
+is a ceiling rather than a required exact rendition, and all provider-specific
+format selection remains inside this add-on.
+
 yt-dlp's reusable client and signature cache is stored in the host-provided
 add-on cache directory. The installed package remains immutable, including on
 Windows where the host deliberately does not expose an operator home directory

@@ -55,7 +55,9 @@ staged yt-dlp archive to emit only identities that have not been imported yet.
 It still examines the complete bounded playlist window because YouTube
 playlists can be reordered; encountering a known identity therefore never
 stops discovery before a later unseen item. The host owns archive promotion,
-so a cancelled or invalid import cannot advance the live checkpoint.
+so a cancelled or invalid import cannot advance the live checkpoint. A separate
+one-entry flat probe refreshes playlist title, description, tags, people,
+artwork, and stable identifiers even when the archive suppresses every item.
 
 Configure the yt-dlp executable under **Settings > Add-ons**, run **Check**,
 then enable the add-on. A Remote Stream definition selects it by identity:

@@ -2634,8 +2634,15 @@ def option(name):
 
 start = int(option("--playlist-start"))
 end = int(option("--playlist-end"))
-archive = pathlib.Path(option("--download-archive"))
 playlist = json.loads(pathlib.Path(os.environ["FAKE_PLAYLIST"]).read_text(encoding="utf-8"))
+if "--download-archive" not in arguments:
+    header = dict(playlist["header"])
+    header["playlist_count"] = len(playlist["entries"])
+    header["entries"] = playlist["entries"][:1]
+    print(json.dumps(header))
+    raise SystemExit(0)
+
+archive = pathlib.Path(option("--download-archive"))
 known = set(archive.read_text(encoding="utf-8").splitlines()) if archive.exists() else set()
 requested = list(range(start, min(end, len(playlist["entries"])) + 1))
 emitted = []
@@ -2698,14 +2705,36 @@ print(json.dumps({
                 "ERSATZRS_ADDON_SETTING_YT_DLP_BIN": str(fake),
                 "ERSATZRS_ADDON_CACHE_DIR": str(cache),
             }
+            initial_header = {
+                "id": "playlist-1",
+                "title": "Fixture playlist",
+                "description": "Original playlist summary",
+                "tags": ["archive", "music"],
+                "channel": "Fixture channel",
+                "uploader": "Fixture uploader",
+                "channel_id": "channel-1",
+                "thumbnails": [
+                    {
+                        "url": "https://images.example.test/playlist.jpg",
+                        "width": 1280,
+                        "height": 720,
+                    }
+                ],
+            }
 
             def refresh(
                 entries: list[dict[str, object]],
                 mode: str,
                 max_items: int = 250,
                 cursor: str | None = None,
+                header: dict[str, object] | None = None,
             ) -> list[dict]:
-                playlist.write_text(json.dumps({"entries": entries}), encoding="utf-8")
+                playlist.write_text(
+                    json.dumps(
+                        {"entries": entries, "header": header or initial_header}
+                    ),
+                    encoding="utf-8",
+                )
                 staged_archive = fixture_root / "staged successor archive.txt"
                 if live_archive.exists():
                     shutil.copyfile(live_archive, staged_archive)
@@ -2765,7 +2794,15 @@ print(json.dumps({
             )
             self.assertEqual([row["rank"] for row in first[2:]], [0, 1])
 
-            unchanged = refresh([item("a"), item("b")], "incremental")
+            changed_header = {
+                **initial_header,
+                "title": "Renamed fixture playlist",
+                "description": "Changed playlist summary",
+                "tags": ["archive", "updated"],
+            }
+            unchanged = refresh(
+                [item("a"), item("b")], "incremental", header=changed_header
+            )
             self.assertEqual(
                 (
                     unchanged[0]["examined_count"],
@@ -2776,6 +2813,35 @@ print(json.dumps({
             )
             self.assertEqual(
                 [row["record_type"] for row in unchanged], ["page", "list"]
+            )
+            self.assertEqual(unchanged[1]["name"], "Renamed fixture playlist")
+            self.assertEqual(
+                unchanged[1]["description"], "Changed playlist summary"
+            )
+            self.assertEqual(
+                unchanged[1]["metadata"]["tags"], ["archive", "updated"]
+            )
+            self.assertEqual(
+                unchanged[1]["metadata"]["people"],
+                [
+                    {"name": "Fixture channel", "role": "Channel", "order": 0},
+                    {"name": "Fixture uploader", "role": "Uploader", "order": 1},
+                ],
+            )
+            self.assertEqual(
+                unchanged[1]["metadata"]["artwork"],
+                [
+                    {
+                        "url": "https://images.example.test/playlist.jpg",
+                        "role": "fanart",
+                        "width": 1280,
+                        "height": 720,
+                    }
+                ],
+            )
+            self.assertEqual(
+                unchanged[1]["metadata"]["guids"],
+                ["yt-dlp-playlist://playlist-1"],
             )
 
             addition_first = refresh(
@@ -2825,8 +2891,38 @@ print(json.dumps({
             )
 
             invocations = [json.loads(line) for line in calls.read_text().splitlines()]
-            self.assertEqual(len(invocations), 5)
-            for arguments in invocations:
+            header_invocations = [
+                arguments
+                for arguments in invocations
+                if "--download-archive" not in arguments
+            ]
+            delta_invocations = [
+                arguments
+                for arguments in invocations
+                if "--download-archive" in arguments
+            ]
+            self.assertEqual(len(header_invocations), 4)
+            self.assertEqual(len(delta_invocations), 5)
+            for arguments in header_invocations:
+                self.assertEqual(
+                    arguments,
+                    [
+                        "--cache-dir",
+                        str(cache),
+                        "--no-config",
+                        "--no-update",
+                        "--quiet",
+                        "--skip-download",
+                        "--flat-playlist",
+                        "--playlist-start",
+                        "1",
+                        "--playlist-end",
+                        "1",
+                        "--dump-single-json",
+                        "https://www.youtube.com/playlist?list=fixture",
+                    ],
+                )
+            for arguments in delta_invocations:
                 self.assertIn("--download-archive", arguments)
                 self.assertIn("--force-write-archive", arguments)
                 self.assertNotIn("--break-on-existing", arguments)
@@ -2839,7 +2935,7 @@ print(json.dumps({
             self.assertEqual(
                 [
                     arguments[arguments.index("--playlist-end") + 1]
-                    for arguments in invocations
+                    for arguments in delta_invocations
                 ],
                 ["250", "250", "2", "4", "250"],
             )

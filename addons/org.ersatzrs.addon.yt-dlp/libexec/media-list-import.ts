@@ -364,10 +364,18 @@ function listRecord(
   request: DiscoverRequest,
   playlist: JsonObject,
   listTitle: string,
+  fallbackDescription = true,
 ): JsonObject {
   const listPlot = text(playlist.description) ??
-    "Remote videos selected by the supplied playlist link.";
+    (fallbackDescription
+      ? "Remote videos selected by the supplied playlist link."
+      : undefined);
   const channel = text(playlist.channel) ?? text(playlist.uploader);
+  const playlistId = text(playlist.playlist_id) ??
+    (Array.isArray(playlist.entries) ? text(playlist.id) : undefined);
+  const videoId = Array.isArray(playlist.entries)
+    ? undefined
+    : text(playlist.id);
   return {
     record_type: "list",
     provider_id: request.source_url,
@@ -381,9 +389,38 @@ function listRecord(
       original_broadcasters: values(channel),
       broadcasters: values(channel),
       artwork: artwork(playlist, "fanart"),
-      guids: [`yt-dlp-list://${request.source_url}`],
+      guids: values(
+        playlistId && `yt-dlp-playlist://${playlistId}`,
+        videoId && `yt-dlp://${videoId}`,
+      ),
     },
   };
+}
+
+async function extractListHeader(
+  request: DiscoverRequest,
+): Promise<JsonObject> {
+  const result = await runProvider([
+    "--no-config",
+    "--no-update",
+    "--quiet",
+    "--skip-download",
+    "--flat-playlist",
+    "--playlist-start",
+    "1",
+    "--playlist-end",
+    "1",
+    "--dump-single-json",
+    request.source_url,
+  ]);
+  if (!result.success) {
+    throw new Error("yt-dlp playlist-header extraction failed");
+  }
+  const header = parseProviderJson(result);
+  if (!text(header.title)) {
+    throw new Error("yt-dlp playlist-header extraction omitted the title");
+  }
+  return header;
 }
 
 async function discoverV1(request: DiscoverRequest): Promise<void> {
@@ -544,6 +581,7 @@ async function discoverV2(request: DiscoverV2Request): Promise<void> {
     throw new Error("invalid archive generation");
   }
   const maxItems = Math.min(Math.max(request.limits.max_items, 1), 250);
+  const header = offset === 0 ? await extractListHeader(request) : undefined;
   const result = await runProvider([
     "--no-config",
     "--no-update",
@@ -576,6 +614,10 @@ async function discoverV2(request: DiscoverV2Request): Promise<void> {
       archived_skipped_count: 1,
       emitted_count: 0,
     });
+    if (header) {
+      const listTitle = text(header.title) ?? "yt-dlp playlist";
+      emit(listRecord(request, header, listTitle, false));
+    }
     return;
   }
 
@@ -622,7 +664,10 @@ async function discoverV2(request: DiscoverV2Request): Promise<void> {
     archived_skipped_count: archivedSkipped,
     emitted_count: rows.length,
   });
-  if (offset === 0) emit(listRecord(request, playlist, listTitle));
+  if (header) {
+    const headerTitle = text(header.title) ?? listTitle;
+    emit(listRecord(request, header, headerTitle, false));
+  }
   rows.forEach(emit);
 }
 

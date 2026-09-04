@@ -50,6 +50,13 @@ link gets its own subfolder and Remote Streams library containing generated
 definitions; the storage path is configurable and no video is downloaded
 permanently.
 
+On hosts that support incremental imports, the add-on uses the host-provided
+staged yt-dlp archive to emit only identities that have not been imported yet.
+It still examines the complete bounded playlist window because YouTube
+playlists can be reordered; encountering a known identity therefore never
+stops discovery before a later unseen item. The host owns archive promotion,
+so a cancelled or invalid import cannot advance the live checkpoint.
+
 Configure the yt-dlp executable under **Settings > Add-ons**, run **Check**,
 then enable the add-on. A Remote Stream definition selects it by identity:
 

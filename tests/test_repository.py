@@ -2612,6 +2612,252 @@ printf '%s\n' '{"title":"Fixture playlist","description":"Fixture list descripti
     @unittest.skipUnless(
         shutil.which("deno") or shutil.which("deno.exe"), "deno required"
     )
+    def test_yt_dlp_v2_uses_staged_archive_for_exact_incremental_deltas(self) -> None:
+        addon_root = ROOT / "addons" / "org.ersatzrs.addon.yt-dlp"
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture_root = pathlib.Path(temporary) / "stateful fixture"
+            fixture_root.mkdir()
+            provider = fixture_root / "fake_provider.py"
+            provider.write_text(
+                """import json
+import os
+import pathlib
+import sys
+
+arguments = sys.argv[1:]
+with open(os.environ["FAKE_CALLS"], "a", encoding="utf-8") as calls:
+    calls.write(json.dumps(arguments) + "\\n")
+
+def option(name):
+    index = arguments.index(name)
+    return arguments[index + 1]
+
+start = int(option("--playlist-start"))
+end = int(option("--playlist-end"))
+archive = pathlib.Path(option("--download-archive"))
+playlist = json.loads(pathlib.Path(os.environ["FAKE_PLAYLIST"]).read_text(encoding="utf-8"))
+known = set(archive.read_text(encoding="utf-8").splitlines()) if archive.exists() else set()
+requested = list(range(start, min(end, len(playlist["entries"])) + 1))
+emitted = []
+new_archive_lines = []
+for position in requested:
+    entry = dict(playlist["entries"][position - 1])
+    archive_line = "youtube " + entry["id"]
+    if archive_line in known:
+        continue
+    entry["playlist_index"] = position
+    emitted.append(entry)
+    known.add(archive_line)
+    new_archive_lines.append(archive_line)
+archive.parent.mkdir(parents=True, exist_ok=True)
+with archive.open("a", encoding="utf-8") as output:
+    for line in new_archive_lines:
+        output.write(line + "\\n")
+print(json.dumps({
+    "id": "playlist-1",
+    "title": "Fixture playlist",
+    "description": "Overview description",
+    "playlist_count": len(playlist["entries"]),
+    "requested_entries": [entry["playlist_index"] for entry in emitted],
+    "entries": emitted,
+}))
+""",
+                encoding="utf-8",
+            )
+            calls = fixture_root / "provider calls.ndjson"
+            playlist = fixture_root / "provider playlist.json"
+            cache = fixture_root / "managed cache"
+            live_archive = fixture_root / "live archive.txt"
+            if os.name == "nt":
+                fake = fixture_root / "fake yt-dlp.cmd"
+                fake.write_text(
+                    '@echo off\n"%PYTHON%" "%FAKE_PROVIDER%" %*\n',
+                    encoding="utf-8",
+                )
+                command = [
+                    os.environ.get("COMSPEC", "cmd.exe"),
+                    "/d",
+                    "/c",
+                    str(addon_root / "addon.bat"),
+                ]
+            else:
+                fake = fixture_root / "fake yt-dlp"
+                fake.write_text(
+                    '#!/bin/sh\nexec "$PYTHON" "$FAKE_PROVIDER" "$@"\n',
+                    encoding="utf-8",
+                )
+                fake.chmod(0o755)
+                command = ["/bin/sh", str(addon_root / "addon.sh")]
+            environment = {
+                **os.environ,
+                "PYTHON": sys.executable,
+                "FAKE_PROVIDER": str(provider),
+                "FAKE_CALLS": str(calls),
+                "FAKE_PLAYLIST": str(playlist),
+                "YT_DLP_BIN": str(fake),
+                "ERSATZRS_ADDON_SETTING_YT_DLP_BIN": str(fake),
+                "ERSATZRS_ADDON_CACHE_DIR": str(cache),
+            }
+
+            def refresh(
+                entries: list[dict[str, object]],
+                mode: str,
+                max_items: int = 250,
+                cursor: str | None = None,
+            ) -> list[dict]:
+                playlist.write_text(json.dumps({"entries": entries}), encoding="utf-8")
+                staged_archive = fixture_root / "staged successor archive.txt"
+                if live_archive.exists():
+                    shutil.copyfile(live_archive, staged_archive)
+                else:
+                    staged_archive.unlink(missing_ok=True)
+                request = {
+                    "source_url": "https://www.youtube.com/playlist?list=fixture",
+                    "record_capability": "media-list.list.v6",
+                    "mode": mode,
+                    "archive": {
+                        "staged_path": str(staged_archive),
+                        "generation": 1,
+                        "entry_count": (
+                            len(live_archive.read_text().splitlines())
+                            if live_archive.exists()
+                            else 0
+                        ),
+                        "sha256": "0" * 64,
+                        "max_bytes": 1_048_576,
+                        "max_entries": 10_000,
+                    },
+                    "limits": {
+                        "max_items": max_items,
+                        "max_output_bytes": 4_194_304,
+                    },
+                }
+                if cursor is not None:
+                    request["cursor"] = cursor
+                result = subprocess.run(
+                    [*command, "discover"],
+                    input=json.dumps(request),
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    env=environment,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                shutil.copyfile(staged_archive, live_archive)
+                return [json.loads(line) for line in result.stdout.splitlines()]
+
+            def item(identity: str) -> dict[str, object]:
+                return {
+                    "id": identity,
+                    "title": f"Video {identity}",
+                    "webpage_url": f"https://www.youtube.com/watch?v={identity}",
+                    "availability": "public",
+                }
+
+            first = refresh([item("a"), item("b")], "full")
+            self.assertEqual(
+                (
+                    first[0]["examined_count"],
+                    first[0]["archived_skipped_count"],
+                    first[0]["emitted_count"],
+                ),
+                (2, 0, 2),
+            )
+            self.assertEqual([row["rank"] for row in first[2:]], [0, 1])
+
+            unchanged = refresh([item("a"), item("b")], "incremental")
+            self.assertEqual(
+                (
+                    unchanged[0]["examined_count"],
+                    unchanged[0]["archived_skipped_count"],
+                    unchanged[0]["emitted_count"],
+                ),
+                (2, 2, 0),
+            )
+            self.assertEqual(
+                [row["record_type"] for row in unchanged], ["page", "list"]
+            )
+
+            addition_first = refresh(
+                [item("a"), item("b"), item("c")], "incremental", max_items=2
+            )
+            self.assertEqual(
+                (
+                    addition_first[0]["examined_count"],
+                    addition_first[0]["archived_skipped_count"],
+                    addition_first[0]["emitted_count"],
+                ),
+                (2, 2, 0),
+            )
+            self.assertFalse(addition_first[0]["complete"])
+            self.assertEqual(addition_first[0]["next_cursor"], "2")
+            addition = refresh(
+                [item("a"), item("b"), item("c")],
+                "incremental",
+                max_items=2,
+                cursor="2",
+            )
+            self.assertEqual(
+                (
+                    addition[0]["examined_count"],
+                    addition[0]["archived_skipped_count"],
+                    addition[0]["emitted_count"],
+                ),
+                (1, 0, 1),
+            )
+            self.assertEqual(
+                (addition[1]["provider_id"], addition[1]["rank"]), ("c", 2)
+            )
+
+            reordered = refresh(
+                [item("a"), item("d"), item("b"), item("c")], "incremental"
+            )
+            self.assertEqual(
+                (
+                    reordered[0]["examined_count"],
+                    reordered[0]["archived_skipped_count"],
+                    reordered[0]["emitted_count"],
+                ),
+                (4, 3, 1),
+            )
+            self.assertEqual(
+                (reordered[2]["provider_id"], reordered[2]["rank"]), ("d", 1)
+            )
+
+            invocations = [json.loads(line) for line in calls.read_text().splitlines()]
+            self.assertEqual(len(invocations), 5)
+            for arguments in invocations:
+                self.assertIn("--download-archive", arguments)
+                self.assertIn("--force-write-archive", arguments)
+                self.assertNotIn("--break-on-existing", arguments)
+                self.assertNotIn("--lazy-playlist", arguments)
+                self.assertNotIn("--ignore-errors", arguments)
+                self.assertEqual(
+                    arguments[arguments.index("--download-archive") + 1],
+                    str(fixture_root / "staged successor archive.txt"),
+                )
+            self.assertEqual(
+                [
+                    arguments[arguments.index("--playlist-end") + 1]
+                    for arguments in invocations
+                ],
+                ["250", "250", "2", "4", "250"],
+            )
+            self.assertEqual(
+                live_archive.read_text(encoding="utf-8").splitlines(),
+                ["youtube a", "youtube b", "youtube c", "youtube d"],
+            )
+
+        manifest = tomllib.loads(
+            (addon_root / "addon.toml").read_text(encoding="utf-8")
+        )
+        capabilities = {item["id"] for item in manifest["capabilities"]}
+        self.assertIn("media-list.import.v1", capabilities)
+        self.assertIn("media-list.import.v2", capabilities)
+
+    @unittest.skipUnless(
+        shutil.which("deno") or shutil.which("deno.exe"), "deno required"
+    )
     def test_yt_dlp_v6_maps_restrictions_without_echoing_provider_diagnostics(self) -> None:
         addon_root = ROOT / "addons" / "org.ersatzrs.addon.yt-dlp"
         transformer = addon_root / "libexec" / "media-list.ts"

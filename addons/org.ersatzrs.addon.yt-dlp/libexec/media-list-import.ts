@@ -7,6 +7,18 @@ interface DiscoverRequest {
   limits: { max_items: number; max_output_bytes: number };
 }
 
+interface DiscoverV2Request extends DiscoverRequest {
+  mode: "full" | "incremental";
+  archive: {
+    staged_path: string;
+    generation: number;
+    entry_count: number;
+    sha256: string;
+    max_bytes: number;
+    max_entries: number;
+  };
+}
+
 interface EnrichRequest {
   source_url: string;
   record_capability: string;
@@ -348,7 +360,33 @@ function parseProviderJson(result: ProviderResult): JsonObject {
   return parsed;
 }
 
-async function discover(request: DiscoverRequest): Promise<void> {
+function listRecord(
+  request: DiscoverRequest,
+  playlist: JsonObject,
+  listTitle: string,
+): JsonObject {
+  const listPlot = text(playlist.description) ??
+    "Remote videos selected by the supplied playlist link.";
+  const channel = text(playlist.channel) ?? text(playlist.uploader);
+  return {
+    record_type: "list",
+    provider_id: request.source_url,
+    name: listTitle,
+    description: listPlot,
+    metadata: {
+      title: listTitle,
+      plot: listPlot,
+      tags: values(playlist.tags),
+      people: people(playlist),
+      original_broadcasters: values(channel),
+      broadcasters: values(channel),
+      artwork: artwork(playlist, "fanart"),
+      guids: [`yt-dlp-list://${request.source_url}`],
+    },
+  };
+}
+
+async function discoverV1(request: DiscoverRequest): Promise<void> {
   const offset = request.cursor === undefined ? 0 : Number(request.cursor);
   if (!Number.isSafeInteger(offset) || offset < 0) {
     throw new Error("invalid discovery cursor");
@@ -393,26 +431,198 @@ async function discover(request: DiscoverRequest): Promise<void> {
     total_hint: totalHint && totalHint <= 10_000 ? totalHint : undefined,
   });
   if (offset === 0) {
-    const listPlot = text(playlist.description) ??
-      "Remote videos selected by the supplied playlist link.";
-    const channel = text(playlist.channel) ?? text(playlist.uploader);
-    emit({
-      record_type: "list",
-      provider_id: request.source_url,
-      name: listTitle,
-      description: listPlot,
-      metadata: {
-        title: listTitle,
-        plot: listPlot,
-        tags: values(playlist.tags),
-        people: people(playlist),
-        original_broadcasters: values(channel),
-        broadcasters: values(channel),
-        artwork: artwork(playlist, "fanart"),
-        guids: [`yt-dlp-list://${request.source_url}`],
-      },
-    });
+    emit(listRecord(request, playlist, listTitle));
   }
+  rows.forEach(emit);
+}
+
+function requestedProviderPositions(
+  playlist: JsonObject,
+  offset: number,
+  maxItems: number,
+): number[] | undefined {
+  if (!Array.isArray(playlist.requested_entries)) return undefined;
+  const positions = playlist.requested_entries.map(positiveInteger);
+  if (positions.some((position) => position === undefined)) {
+    throw new Error("yt-dlp returned invalid requested playlist positions");
+  }
+  const result = positions as number[];
+  if (
+    result.length > maxItems || new Set(result).size !== result.length ||
+    result.some((position, index) =>
+      position <= offset || position > offset + maxItems ||
+      (index > 0 && position <= result[index - 1])
+    )
+  ) {
+    throw new Error("yt-dlp returned unexpected requested playlist positions");
+  }
+  return result;
+}
+
+function v2ProviderWindow(
+  playlist: JsonObject,
+  entries: JsonObject[],
+  offset: number,
+  maxItems: number,
+): { examined: number; complete: boolean; totalHint?: number } {
+  const total = positiveInteger(playlist.playlist_count);
+  const positions = requestedProviderPositions(playlist, offset, maxItems);
+  const isPlaylist = Array.isArray(playlist.entries);
+
+  if (!isPlaylist) {
+    if (offset !== 0) {
+      throw new Error(
+        "yt-dlp returned an unexpected direct-video continuation",
+      );
+    }
+    return { examined: 1, complete: true, totalHint: 1 };
+  }
+
+  const emittedPositions = entries.map((entry) =>
+    positiveInteger(entry.playlist_index)
+  );
+  if (emittedPositions.some((position) => position === undefined)) {
+    throw new Error("yt-dlp omitted a provider playlist position");
+  }
+  const emitted = emittedPositions as number[];
+  if (
+    new Set(emitted).size !== emitted.length ||
+    emitted.some((position) =>
+      position <= offset || position > offset + maxItems ||
+      (positions !== undefined && !positions.includes(position))
+    )
+  ) {
+    throw new Error("yt-dlp returned an unexpected provider playlist position");
+  }
+  if (
+    positions !== undefined &&
+    (positions.length !== emitted.length ||
+      positions.some((position, index) => position !== emitted[index]))
+  ) {
+    throw new Error("yt-dlp returned inconsistent requested playlist entries");
+  }
+
+  let examined: number;
+  if (total !== undefined) {
+    examined = Math.min(maxItems, Math.max(0, total - offset));
+  } else if (
+    positions !== undefined && positions.length > 0 &&
+    positions.every((position, index) => position === offset + index + 1)
+  ) {
+    examined = positions.length;
+  } else {
+    throw new Error("yt-dlp did not report the examined playlist window");
+  }
+  if (entries.length > examined) {
+    throw new Error("yt-dlp returned more items than it examined");
+  }
+  const complete = total !== undefined
+    ? offset + examined >= total
+    : examined < maxItems;
+  return {
+    examined,
+    complete,
+    totalHint: total !== undefined && total <= 10_000 ? total : undefined,
+  };
+}
+
+async function discoverV2(request: DiscoverV2Request): Promise<void> {
+  const offset = request.cursor === undefined ? 0 : Number(request.cursor);
+  if (!Number.isSafeInteger(offset) || offset < 0) {
+    throw new Error("invalid discovery cursor");
+  }
+  if (!request.archive || !text(request.archive.staged_path)) {
+    throw new Error("the staged archive path is unavailable");
+  }
+  if (request.mode !== "full" && request.mode !== "incremental") {
+    throw new Error("invalid discovery mode");
+  }
+  if (
+    !Number.isSafeInteger(request.archive.generation) ||
+    request.archive.generation < 1
+  ) {
+    throw new Error("invalid archive generation");
+  }
+  const maxItems = Math.min(Math.max(request.limits.max_items, 1), 250);
+  const result = await runProvider([
+    "--no-config",
+    "--no-update",
+    "--quiet",
+    "--skip-download",
+    "--flat-playlist",
+    "--playlist-start",
+    String(offset + 1),
+    "--playlist-end",
+    String(offset + maxItems),
+    "--download-archive",
+    request.archive.staged_path,
+    "--force-write-archive",
+    "--dump-single-json",
+    request.source_url,
+  ]);
+  if (!result.success) {
+    throw new Error("yt-dlp discovery failed");
+  }
+
+  if (!result.stdout.trim() || result.stdout.trim() === "null") {
+    if (request.mode !== "incremental" || offset !== 0) {
+      throw new Error("yt-dlp returned no JSON object");
+    }
+    emit({
+      record_type: "page",
+      complete: true,
+      strategy: "skip_known",
+      examined_count: 1,
+      archived_skipped_count: 1,
+      emitted_count: 0,
+    });
+    return;
+  }
+
+  const playlist = parseProviderJson(result);
+  const rawEntries = Array.isArray(playlist.entries)
+    ? playlist.entries
+    : [playlist];
+  const entries = rawEntries.map(object);
+  if (entries.some((entry) => entry === undefined)) {
+    throw new Error("yt-dlp returned an invalid unarchived item");
+  }
+  const providerEntries = entries as JsonObject[];
+  const window = v2ProviderWindow(playlist, providerEntries, offset, maxItems);
+  const listTitle = text(playlist.title) ?? "yt-dlp playlist";
+  const rows = providerEntries.map((entry) => {
+    const position = Array.isArray(playlist.entries)
+      ? positiveInteger(entry.playlist_index)
+      : 1;
+    if (position === undefined) {
+      throw new Error("yt-dlp omitted a provider playlist position");
+    }
+    const row = providerItem(entry, position - 1, listTitle);
+    if (!row) {
+      throw new Error("yt-dlp returned an unmappable unarchived item");
+    }
+    return row;
+  });
+  if (request.mode === "full" && offset === 0 && rows.length === 0) {
+    throw new Error("yt-dlp returned no valid media items");
+  }
+  const archivedSkipped = window.examined - rows.length;
+  if (
+    archivedSkipped < 0 || (request.mode === "full" && archivedSkipped !== 0)
+  ) {
+    throw new Error("yt-dlp returned inconsistent archive suppression counts");
+  }
+  emit({
+    record_type: "page",
+    complete: window.complete,
+    next_cursor: window.complete ? undefined : String(offset + window.examined),
+    total_hint: window.totalHint,
+    strategy: "skip_known",
+    examined_count: window.examined,
+    archived_skipped_count: archivedSkipped,
+    emitted_count: rows.length,
+  });
+  if (offset === 0) emit(listRecord(request, playlist, listTitle));
   rows.forEach(emit);
 }
 
@@ -510,7 +720,12 @@ const operation = Deno.args[0];
 const input = await new Response(Deno.stdin.readable).text();
 if (!input.trim()) throw new Error("media-list import request is missing");
 if (operation === "discover") {
-  await discover(JSON.parse(input) as DiscoverRequest);
+  const request = JSON.parse(input) as DiscoverRequest | DiscoverV2Request;
+  if ("mode" in request || "archive" in request) {
+    await discoverV2(request as DiscoverV2Request);
+  } else {
+    await discoverV1(request as DiscoverRequest);
+  }
 } else if (operation === "enrich") {
   await enrich(JSON.parse(input) as EnrichRequest);
 } else throw new Error("usage: media-list-import.ts discover|enrich");

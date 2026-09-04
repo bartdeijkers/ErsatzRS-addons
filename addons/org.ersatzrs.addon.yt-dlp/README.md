@@ -66,8 +66,11 @@ Media-list v4 supplies provider metadata to the same ErsatzRS review editor as
 other add-ons. The operator-installed `yt-dlp` executable performs the complete
 playlist and video extraction, so updating yt-dlp remains the way provider
 changes are repaired. The shared Deno helper only maps yt-dlp's JSON fields to
-the stable provider-neutral v4 document; it does not scrape or implement a
-YouTube client. For retained playlist items, the add-on performs one full
+the stable provider-neutral document; it does not scrape or implement a
+YouTube client. Media-list v6 maps yt-dlp authentication and content restriction
+signals to typed item availability reasons. It emits neither cookie material
+nor provider stderr, and one restricted item does not turn the whole list into
+a provider failure. For retained playlist items, the add-on performs one full
 metadata extraction and emits provider chapters as bounded timestamp/title text through
 `remote-stream.item.v2`. Both entrypoints round fractional starts to whole
 seconds before emission; ErsatzRS owns validation and fragment derivation.

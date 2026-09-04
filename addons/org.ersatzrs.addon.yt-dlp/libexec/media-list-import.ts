@@ -115,6 +115,47 @@ function availability(value: unknown): "available" | "unavailable" | "unknown" {
   return "unknown";
 }
 
+type AvailabilityReasonCode =
+  | "authentication_required"
+  | "content_restricted"
+  | "unavailable";
+
+function availabilityReasonCode(
+  value: unknown,
+): AvailabilityReasonCode | undefined {
+  switch (String(value ?? "")) {
+    case "needs_auth":
+      return "authentication_required";
+    case "private":
+    case "premium_only":
+    case "subscriber_only":
+      return "content_restricted";
+    default:
+      return undefined;
+  }
+}
+
+function failureAvailabilityReason(
+  stderr: string,
+): AvailabilityReasonCode | undefined {
+  if (
+    /age[- ]restricted|age restriction|confirm (?:your )?age|members-only|premium|subscriber|private/i
+      .test(stderr)
+  ) {
+    return "content_restricted";
+  }
+  if (
+    /needs? auth|authentication required|sign in|log in|login|cookies? (?:are )?required|use --cookies/i
+      .test(stderr)
+  ) {
+    return "authentication_required";
+  }
+  if (/unavailable|removed|not available|deleted/i.test(stderr)) {
+    return "unavailable";
+  }
+  return undefined;
+}
+
 function liveness(entry: JsonObject): "unknown" | "finite" | "live" {
   const liveStatus = text(entry.live_status);
   if (
@@ -230,6 +271,7 @@ function providerItem(
     safeHttpsUrl(entry.url);
   if (!id || !title || !sourceUrl) return undefined;
   const state = availability(entry.availability);
+  const reasonCode = availabilityReasonCode(entry.availability);
   const duration = Number(entry.duration);
   const row: JsonObject = {
     record_type: "item",
@@ -245,6 +287,7 @@ function providerItem(
     source_url: sourceUrl,
     availability: state,
     availability_reason: state === "unavailable" ? "not_playable" : undefined,
+    availability_reason_code: reasonCode,
     content_kind: contentKind(entry),
     duration_seconds: Number.isFinite(duration) && duration >= 0
       ? Math.round(duration)
@@ -287,7 +330,6 @@ function emit(value: unknown): void {
 }
 
 function failure(stderr: string): void {
-  const bounded = stderr.trim().slice(-768);
   const rateLimited = /(?:http error )?429|too many requests|rate.?limit/i.test(
     stderr,
   );
@@ -295,7 +337,7 @@ function failure(stderr: string): void {
     record_type: "outcome",
     outcome: "transient_failure",
     code: rateLimited ? "rate-limited" : "provider-request-failed",
-    message: bounded || "The video provider request failed.",
+    message: "The video provider request failed.",
     retry_after_seconds: retryAfter(stderr) ?? (rateLimited ? 60 : undefined),
   });
 }
@@ -327,7 +369,7 @@ async function discover(request: DiscoverRequest): Promise<void> {
     request.source_url,
   ]);
   if (!result.success) {
-    throw new Error(result.stderr.trim() || "yt-dlp discovery failed");
+    throw new Error("yt-dlp discovery failed");
   }
   const playlist = parseProviderJson(result);
   const entries =
@@ -374,11 +416,15 @@ async function discover(request: DiscoverRequest): Promise<void> {
   rows.forEach(emit);
 }
 
-function unavailableItem(request: EnrichRequest): JsonObject {
+function unavailableItem(
+  request: EnrichRequest,
+  reasonCode: AvailabilityReasonCode,
+): JsonObject {
   return {
     ...request.item,
     availability: "unavailable",
     availability_reason: "not_playable",
+    availability_reason_code: reasonCode,
   };
 }
 
@@ -403,18 +449,15 @@ async function enrich(request: EnrichRequest): Promise<void> {
     sourceUrl,
   ]);
   if (!result.success) {
-    if (
-      /private|unavailable|removed|not available|members-only/i.test(
-        result.stderr,
-      )
-    ) {
+    const reasonCode = failureAvailabilityReason(result.stderr);
+    if (reasonCode) {
       emit({
         record_type: "outcome",
         outcome: "unavailable",
-        code: "not-playable",
-        message: "The provider reports that this item is unavailable.",
+        code: reasonCode.replaceAll("_", "-"),
+        message: "The provider reports that this item cannot be played.",
       });
-      emit(unavailableItem(request));
+      emit(unavailableItem(request, reasonCode));
       return;
     }
     failure(result.stderr);
@@ -453,7 +496,12 @@ async function enrich(request: EnrichRequest): Promise<void> {
   emit({
     record_type: "outcome",
     outcome: state === "unavailable" ? "unavailable" : "complete",
-    code: state === "unavailable" ? "not-playable" : undefined,
+    code: state === "unavailable"
+      ? String(mapped.availability_reason_code ?? "unavailable").replaceAll(
+        "_",
+        "-",
+      )
+      : undefined,
   });
   emit(mapped);
 }

@@ -153,6 +153,16 @@ function availability(value: unknown): "available" | "unavailable" | "unknown" {
   return "unknown";
 }
 
+function availabilityReasonCode(value: unknown): string | undefined {
+  if (value === "needs_auth") return "authentication_required";
+  if (
+    ["private", "premium_only", "subscriber_only"].includes(String(value ?? ""))
+  ) {
+    return "content_restricted";
+  }
+  return undefined;
+}
+
 function liveness(entry: ProviderEntry): "unknown" | "finite" | "live" {
   if (
     entry.is_live === true ||
@@ -275,6 +285,8 @@ for (const entry of entries) {
     metadata: metadata(entry, listTitle),
   };
   if (state === "unavailable") row.availability_reason = "not_playable";
+  const reasonCode = availabilityReasonCode(entry.availability);
+  if (reasonCode) row.availability_reason_code = reasonCode;
   console.log(JSON.stringify(row));
   rank++;
 }

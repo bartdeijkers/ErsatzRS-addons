@@ -2527,7 +2527,7 @@ printf '%s\n' '{"title":"Fixture playlist","description":"Fixture list descripti
             )
             discover_request = {
                 "source_url": "https://www.youtube.com/playlist?list=fixture",
-                "record_capability": "media-list.list.v5",
+                "record_capability": "media-list.list.v6",
                 "limits": {"max_items": 250, "max_output_bytes": 4_194_304},
             }
             discovered = subprocess.run(
@@ -2561,7 +2561,7 @@ printf '%s\n' '{"title":"Fixture playlist","description":"Fixture list descripti
             environment["FAKE_FIXTURE"] = str(detail)
             enrich_request = {
                 "source_url": discover_request["source_url"],
-                "record_capability": "media-list.list.v5",
+                "record_capability": "media-list.list.v6",
                 "provider_id": "video-1",
                 "overview_fingerprint": "fixture-fingerprint",
                 "item": rows[2],
@@ -2591,6 +2591,7 @@ printf '%s\n' '{"title":"Fixture playlist","description":"Fixture list descripti
         capabilities = {item["id"] for item in manifest["capabilities"]}
         self.assertIn("media-list.import.v1", capabilities)
         self.assertIn("media-list.list.v5", capabilities)
+        self.assertIn("media-list.list.v6", capabilities)
         for entrypoint in ["addon.sh", "addon.bat"]:
             source = (addon_root / entrypoint).read_text(encoding="utf-8")
             self.assertIn("media-list-import.ts", source)
@@ -2607,6 +2608,111 @@ printf '%s\n' '{"title":"Fixture playlist","description":"Fixture list descripti
         self.assertIn('"liveness":%(ersatzrs_liveness)j', posix_source)
         self.assertIn('"is_live":%(ersatzrs_live_flag)s', posix_source)
         self.assertIn("liveness = $liveness", powershell_source)
+
+    @unittest.skipUnless(
+        shutil.which("deno") or shutil.which("deno.exe"), "deno required"
+    )
+    def test_yt_dlp_v6_maps_restrictions_without_echoing_provider_diagnostics(self) -> None:
+        addon_root = ROOT / "addons" / "org.ersatzrs.addon.yt-dlp"
+        transformer = addon_root / "libexec" / "media-list.ts"
+        environment = os.environ.copy()
+        environment["ERSATZRS_MEDIA_LIST_URL"] = (
+            "https://www.youtube.com/playlist?list=fixture"
+        )
+        playlist = {
+            "title": "Restricted fixtures",
+            "entries": [
+                {
+                    "id": "private-1",
+                    "title": "Private",
+                    "webpage_url": "https://www.youtube.com/watch?v=private-1",
+                    "availability": "private",
+                },
+                {
+                    "id": "auth-1",
+                    "title": "Authentication",
+                    "webpage_url": "https://www.youtube.com/watch?v=auth-1",
+                    "availability": "needs_auth",
+                },
+            ],
+        }
+        transformed = subprocess.run(
+            [
+                shutil.which("deno") or shutil.which("deno.exe") or "deno",
+                "run",
+                "--quiet",
+                "--allow-env=ERSATZRS_MEDIA_LIST_URL,PLAYLIST_URL",
+                str(transformer),
+            ],
+            input=json.dumps(playlist),
+            check=False,
+            capture_output=True,
+            text=True,
+            env=environment,
+        )
+        self.assertEqual(transformed.returncode, 0, transformed.stderr)
+        rows = [json.loads(line) for line in transformed.stdout.splitlines()]
+        self.assertEqual(rows[1]["availability_reason_code"], "content_restricted")
+        self.assertEqual(rows[2]["availability_reason_code"], "authentication_required")
+        self.assertEqual(rows[1]["availability_reason"], "not_playable")
+
+        with tempfile.TemporaryDirectory() as temporary:
+            fixtures = pathlib.Path(temporary)
+            cache = fixtures / "cache"
+            secret_marker = "session_cookie=must-not-cross-boundary"
+            if os.name == "nt":
+                fake = fixtures / "fake-yt-dlp.cmd"
+                fake.write_text(
+                    f"@echo off\n>&2 echo ERROR: Sign in required; {secret_marker}\nexit /b 1\n",
+                    encoding="utf-8",
+                )
+            else:
+                fake = fixtures / "fake-yt-dlp"
+                fake.write_text(
+                    "#!/bin/sh\n"
+                    f"printf '%s\\n' 'ERROR: Sign in required; {secret_marker}' >&2\n"
+                    "exit 1\n",
+                    encoding="utf-8",
+                )
+                fake.chmod(0o755)
+            environment.update(
+                {
+                    "YT_DLP_BIN": str(fake),
+                    "YT_DLP_CACHE_DIR": str(cache),
+                }
+            )
+            request = {
+                "source_url": environment["ERSATZRS_MEDIA_LIST_URL"],
+                "record_capability": "media-list.list.v6",
+                "provider_id": "auth-1",
+                "overview_fingerprint": "fixture",
+                "item": rows[2],
+            }
+            enriched = subprocess.run(
+                [
+                    shutil.which("deno") or shutil.which("deno.exe") or "deno",
+                    "run",
+                    "--quiet",
+                    "--allow-env=YT_DLP_BIN,YT_DLP_CACHE_DIR",
+                    "--allow-run",
+                    str(addon_root / "libexec" / "media-list-import.ts"),
+                    "enrich",
+                ],
+                input=json.dumps(request),
+                check=False,
+                capture_output=True,
+                text=True,
+                env=environment,
+            )
+            self.assertEqual(enriched.returncode, 0, enriched.stderr)
+            detail_rows = [json.loads(line) for line in enriched.stdout.splitlines()]
+            self.assertEqual(detail_rows[0]["code"], "authentication-required")
+            self.assertEqual(
+                detail_rows[1]["availability_reason_code"],
+                "authentication_required",
+            )
+            self.assertNotIn(secret_marker, enriched.stdout)
+            self.assertNotIn(secret_marker, enriched.stderr)
 
     @unittest.skipUnless(
         shutil.which("deno") or shutil.which("deno.exe"), "deno required"

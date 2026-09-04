@@ -1,6 +1,6 @@
 manifest_version = 4
 id = "org.ersatzrs.addon.yt-dlp"
-version = "0.7.5"
+version = "0.7.6"
 license = "Zlib"
 source_url = "https://github.com/bartdeijkers/ErsatzRS-addons/tree/main/addons/org.ersatzrs.addon.yt-dlp"
 host_version = ">=0.1.0, <0.2.0"
@@ -65,6 +65,9 @@ id = "media-list.list.v4"
 
 [[capabilities]]
 id = "media-list.list.v5"
+
+[[capabilities]]
+id = "media-list.list.v6"
 
 [[capabilities]]
 id = "media-list.import.v1"

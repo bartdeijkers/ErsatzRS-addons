@@ -1,3 +1,5 @@
+import { boundedCommand, browserArguments } from "./item-options.ts";
+
 type JsonObject = Record<string, unknown>;
 
 interface DiscoverRequest {
@@ -683,7 +685,7 @@ function unavailableItem(
   };
 }
 
-async function enrich(request: EnrichRequest): Promise<void> {
+async function enrich(request: EnrichRequest, options?: unknown): Promise<void> {
   const sourceUrl = safeHttpsUrl(request.item.source_url);
   if (!sourceUrl) {
     emit({
@@ -694,15 +696,15 @@ async function enrich(request: EnrichRequest): Promise<void> {
     });
     return;
   }
-  const result = await runProvider([
-    "--no-config",
-    "--no-update",
-    "--quiet",
-    "--skip-download",
-    "--no-playlist",
-    "--dump-single-json",
+  const arguments_ = [
+    "--no-config", "--no-update", "--quiet", "--skip-download",
+    "--no-playlist", "--dump-single-json",
+    ...(options === undefined ? [] : browserArguments(options)),
     sourceUrl,
-  ]);
+  ];
+  const result = options === undefined
+    ? await runProvider(arguments_)
+    : await boundedCommand(ytDlp, ["--cache-dir", ytDlpCacheDir, ...arguments_]);
   if (!result.success) {
     const reasonCode = failureAvailabilityReason(result.stderr);
     if (reasonCode) {
@@ -726,7 +728,7 @@ async function enrich(request: EnrichRequest): Promise<void> {
       record_type: "outcome",
       outcome: "permanent_failure",
       code: "malformed-provider-response",
-      message: String(error).slice(0, 768),
+      message: options === undefined ? String(error).slice(0, 768) : "The provider response was malformed.",
     });
     return;
   }
@@ -773,4 +775,13 @@ if (operation === "discover") {
   }
 } else if (operation === "enrich") {
   await enrich(JSON.parse(input) as EnrichRequest);
+} else if (operation === "enrich-options") {
+  try {
+    const envelope = JSON.parse(input);
+    if (envelope.options === undefined) throw new Error("missing options");
+    await enrich(envelope.request, envelope.options);
+  } catch {
+    console.error(JSON.stringify({ code: "item-enrichment-failed", message: "Item enrichment failed." }));
+    Deno.exit(70);
+  }
 } else throw new Error("usage: media-list-import.ts discover|enrich");

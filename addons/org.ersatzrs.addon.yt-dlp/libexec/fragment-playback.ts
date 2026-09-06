@@ -1,3 +1,5 @@
+import { browserArguments, itemOptions } from "./item-options.ts";
+
 function seconds(value: string): number {
   if (/^\d+(?:\.\d+)?$/.test(value)) return Number(value);
   const parts = value.split(":");
@@ -49,6 +51,18 @@ const downloaderOptions = downloaderArgs.length === 0
   ? []
   : ["--downloader-args", `ffmpeg_i:${downloaderArgs.join(" ")}`];
 const heightFilter = `[height<=${maxVideoHeight}]`;
+let optionArguments: string[] = [];
+const optionsAware = Deno.env.get("ERSATZRS_ADDON_CAPABILITY") === "remote-stream.play.v3";
+if (optionsAware) {
+  try {
+    const options = JSON.parse(Deno.env.get("ERSATZRS_MEDIA_LIST_OPTIONS") ?? "null");
+    if (itemOptions(options).remove) throw new Error("prepared artifact required");
+    optionArguments = browserArguments(options);
+  } catch {
+    console.error('{"code":"prepared-playback-required","message":"Valid direct playback options or a prepared artifact are required."}');
+    Deno.exit(64);
+  }
+}
 
 const command = new Deno.Command(ytDlp, {
   args: [
@@ -58,6 +72,7 @@ const command = new Deno.Command(ytDlp, {
     ytDlpCacheDir,
     "--quiet",
     "--no-playlist",
+    ...optionArguments,
     "--ffmpeg-location",
     ffmpeg,
     "--downloader",
@@ -94,7 +109,8 @@ const command = new Deno.Command(ytDlp, {
   ],
   stdin: "null",
   stdout: "inherit",
-  stderr: "inherit",
+  // Cookie/profile diagnostics must not cross the options-aware playback boundary.
+  stderr: optionsAware ? "null" : "inherit",
 });
 const status = await command.spawn().status;
 Deno.exit(status.code);

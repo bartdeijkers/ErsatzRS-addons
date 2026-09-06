@@ -1763,7 +1763,7 @@ exit 0
                 / "addon.toml"
             ).read_text(encoding="utf-8")
         )
-        self.assertEqual(manifest["manifest_version"], 4)
+        self.assertEqual(manifest["manifest_version"], 5)
         self.assertTrue(
             {
                 "media-list.list.v1",

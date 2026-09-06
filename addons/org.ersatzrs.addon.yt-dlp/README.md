@@ -27,8 +27,73 @@ Because the runtime is resolved from `PATH`, confirm it is visible to the
 or scheduler that does not read the usual shell profile needs the runtime's
 directory added to its own `PATH`.
 
-Video is streamed straight through ErsatzRS for immediate playback; no
-permanent file is written.
+Direct video is streamed through ErsatzRS. SponsorBlock-enabled finite playback
+requires host interval-streaming integration or the separate prepared-file path;
+the add-on never silently returns an uncut stdout stream for that request.
+
+## Per-item options
+
+Hosts supporting manifest schema 5 render list defaults and item overrides for
+**Browser cookies** (`none`, `firefox`, `chrome`, or `chromium`) and **Remove
+SponsorBlock segments** (checked by default for finite items). Existing
+publications keep their saved behavior until the operator saves and publishes.
+The selected browser must be available to the service account. Only the browser
+name is passed to yt-dlp; profile paths, cookie exports, and cookie values are
+not accepted as settings. **Test access** returns typed outcomes for inaccessible
+or locked profiles, decryption failure, provider restrictions, and other failure.
+It does not return provider stderr, cookies, headers, or temporary media URLs.
+
+`media-list.interval-metadata.v1` provides metadata-only discovery for host-owned
+streaming cuts. It returns whole-source duration and at most 1,024 half-open
+millisecond intervals, bound to the requested provider, option context and tool
+version. The host clips those intervals to its saved chapter window. Successful
+empty intervals are distinct from unsupported extractors or failed discovery;
+neither failure becomes successful uncut playback. The operation simulates
+yt-dlp with downloads disabled and never creates a processed media file.
+Its marking categories match `--sponsorblock-remove default`, excluding filler,
+highlights and chapter markers. Streaming transport and channel integration are
+still being implemented in ErsatzRS; this metadata operation alone does not
+make the existing stdout playback stream seekable.
+
+`remote-stream.play.v4` uses the `play-intervals` operation with bounded JSON
+stdin containing frozen source intervals. Native yt-dlp owns extraction,
+authentication and every media transfer. One extraction checks the source
+duration before stdout begins; a private temporary info file avoids repeated
+extraction for each retained section. Sections are emitted sequentially as NUT
+with raw `yuv420p` video and `pcm_f32le` audio, with cumulative timestamps and
+bounded preroll. The host owns the one final lossy encoder. No transport URLs or
+headers are returned to the host, and no removed interval becomes an uncut fallback.
+This initial transport is SDR-only: detected HDR sources are refused. Raw video
+avoids another lossy codec, but conversion to 8-bit `yuv420p` is not universally
+lossless: higher bit depth and other pixel formats may lose information. Missing
+HDR labels are not evidence of SDR; host admission must not assume HDR support.
+Audio language, title and channel-layout preservation require fresh output-probe
+validation; this operation selects one native yt-dlp audio track. Exact
+cross-platform, profile and uninterrupted host playback acceptance remains open.
+The wrapper removes its private info file on normal/error completion; abrupt
+process-tree termination requires host-owned temporary-directory cleanup. Native
+yt-dlp remains the transfer owner for subsequent managed-media work.
+
+The separate full-file preparation operation uses standard
+`--sponsorblock-remove default` processing,
+including yt-dlp's ordinary no-segments success. Provider/API or processing
+failure cannot admit an unprocessed substitute. The final file is probed for
+duration and hashed; the host checks and owns its storage budget, cancellation,
+publication, and retention. Live or unknown-liveness items keep direct playback.
+An options-aware direct stdout playback request requiring removal is rejected;
+the host must resolve its published playback selection instead.
+
+For chapter fragments, preparation downloads the whole source within the same
+host storage and time budgets. Standard yt-dlp `--remove-chapters` ranges remove
+the content before and after the fragment alongside SponsorBlock removal, using
+one original-source timeline. This avoids applying original offsets to an
+already shortened file. It can cost more bandwidth and temporary space than
+direct fragment playback. If yt-dlp reports that the requested cuts remove all
+content, preparation fails instead of admitting the unchanged original.
+
+Both platform entrypoints use the same Deno adapters. The host supplies managed
+FFmpeg and ffprobe, and limits the child process tree and staging usage during
+preparation. No subtitle acquisition or automatic yt-dlp update is added here.
 
 For live HLS playback, play contract v2 accepts a host-selected maximum video
 height. ErsatzRS normally requests up to 1080p and can temporarily retry at
@@ -70,7 +135,9 @@ duration: "00:20:00"
 title: Example public-domain video
 ```
 
-Temporary media URLs and request headers stay inside yt-dlp's streaming flow.
+For legacy stdout playback, temporary media URLs and request headers stay inside
+yt-dlp's streaming flow. Seekable resolution returns them only as invocation-local
+transport data to the host.
 Media-list v4 supplies provider metadata to the same ErsatzRS review editor as
 other add-ons. The operator-installed `yt-dlp` executable performs the complete
 playlist and video extraction, so updating yt-dlp remains the way provider

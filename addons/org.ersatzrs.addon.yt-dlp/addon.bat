@@ -12,6 +12,12 @@ if not defined YT_DLP_CACHE_DIR goto :missing_cache
 if /i "%OPERATION%"=="check" goto :check
 if /i "%OPERATION%"=="discover" goto :media_list_import
 if /i "%OPERATION%"=="enrich" goto :media_list_import
+if /i "%OPERATION%"=="enrich-options" goto :media_list_import
+if /i "%OPERATION%"=="runtime-info" goto :item_operation
+if /i "%OPERATION%"=="test-access" goto :item_operation
+if /i "%OPERATION%"=="interval-metadata" goto :item_operation
+if /i "%OPERATION%"=="play-intervals" goto :item_operation
+if /i "%OPERATION%"=="prepare" goto :item_operation
 if /i "%OPERATION%"=="list" goto :list
 if /i "%OPERATION%"=="item" goto :item
 if /i "%OPERATION%"=="play" goto :play
@@ -38,6 +44,10 @@ if errorlevel 1 goto :missing_js_runtime
 deno.exe run --quiet --allow-env=YT_DLP_BIN,YT_DLP_CACHE_DIR --allow-run "%~dp0libexec\media-list-import.ts" "%OPERATION%"
 if errorlevel 1 goto :provider_failed
 exit /b 0
+
+:item_operation
+deno.exe run --quiet --allow-env --allow-run --allow-read --allow-write "%~dp0libexec\item-operations.ts" "%OPERATION%"
+exit /b %ERRORLEVEL%
 
 :item
 if not defined ERSATZRS_REMOTE_STREAM_ITEM_IDS goto :missing_item_ids

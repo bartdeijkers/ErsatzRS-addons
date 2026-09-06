@@ -1,6 +1,6 @@
-manifest_version = 4
+manifest_version = 5
 id = "org.ersatzrs.addon.yt-dlp"
-version = "0.7.8"
+version = "0.8.0"
 license = "Zlib"
 source_url = "https://github.com/bartdeijkers/ErsatzRS-addons/tree/main/addons/org.ersatzrs.addon.yt-dlp"
 host_version = ">=0.1.0, <0.2.0"
@@ -74,6 +74,57 @@ id = "media-list.import.v1"
 
 [[capabilities]]
 id = "media-list.import.v2"
+
+[[capabilities]]
+id = "media-list.item-runtime.v1"
+
+[[capabilities]]
+id = "media-list.access-check.v1"
+
+[[capabilities]]
+id = "media-list.enrich.v1"
+
+[[capabilities]]
+id = "media-list.prepare.v1"
+
+[[capabilities]]
+id = "media-list.interval-metadata.v1"
+
+[[capabilities]]
+id = "remote-stream.play.v3"
+
+[[capabilities]]
+id = "remote-stream.play.v4"
+
+[[capabilities]]
+id = "media-list.options.v1"
+
+[[capabilities.options]]
+key = "cookies_from_browser"
+label = { "en-US" = "Browser cookies", nl = "Browsercookies", "de-DE" = "Browser-Cookies", "fr-FR" = "Cookies du navigateur", "it-IT" = "Cookie del browser", pl = "Ciasteczka przeglądarki", "pt-BR" = "Cookies do navegador", "es-419" = "Cookies del navegador", "es-ES" = "Cookies del navegador" }
+description = { "en-US" = "Use the selected browser of the service account. Cookie values are never stored in list settings.", nl = "Gebruik de geselecteerde browser van het serviceaccount. Cookiewaarden worden nooit in lijstinstellingen opgeslagen.", "de-DE" = "Den ausgewählten Browser des Dienstkontos verwenden. Cookie-Werte werden nie in Listeneinstellungen gespeichert.", "fr-FR" = "Utiliser le navigateur sélectionné du compte de service. Les cookies ne sont jamais enregistrés dans les paramètres de liste.", "it-IT" = "Usa il browser selezionato dell'account di servizio. I cookie non vengono mai salvati nelle impostazioni della lista.", pl = "Użyj wybranej przeglądarki konta usługi. Wartości ciasteczek nie są zapisywane w ustawieniach listy.", "pt-BR" = "Use o navegador selecionado da conta do serviço. Os cookies nunca são armazenados nas configurações da lista.", "es-419" = "Usa el navegador seleccionado de la cuenta del servicio. Las cookies nunca se guardan en la configuración de la lista.", "es-ES" = "Usa el navegador seleccionado de la cuenta del servicio. Las cookies nunca se guardan en la configuración de la lista." }
+scope = "both"
+operation_targets = ["enrich", "artifact", "preparation", "playback", "test_access"]
+applicability = "all"
+kind = "enum"
+default = "none"
+choices = [
+  { value = "none", label = { "en-US" = "None", nl = "Geen", "de-DE" = "Keine", "fr-FR" = "Aucun", "it-IT" = "Nessuno", pl = "Brak", "pt-BR" = "Nenhum", "es-419" = "Ninguno", "es-ES" = "Ninguno" } },
+  { value = "firefox", label = { "en-US" = "Firefox" } },
+  { value = "chrome", label = { "en-US" = "Chrome" } },
+  { value = "chromium", label = { "en-US" = "Chromium" } },
+]
+
+[[capabilities.options]]
+key = "sponsorblock_remove"
+label = { "en-US" = "Remove SponsorBlock segments", nl = "SponsorBlock-segmenten verwijderen", "de-DE" = "SponsorBlock-Segmente entfernen", "fr-FR" = "Supprimer les segments SponsorBlock", "it-IT" = "Rimuovi segmenti SponsorBlock", pl = "Usuń segmenty SponsorBlock", "pt-BR" = "Remover segmentos do SponsorBlock", "es-419" = "Eliminar segmentos de SponsorBlock", "es-ES" = "Eliminar segmentos de SponsorBlock" }
+description = { "en-US" = "Remove SponsorBlock segments from finite videos in every delivery mode. Required interval lookup or processing may delay publication.", nl = "Verwijder SponsorBlock-segmenten uit eindige video's in elke afspeelmodus. De vereiste intervalopvraag of verwerking kan publicatie vertragen.", "de-DE" = "SponsorBlock-Segmente in jedem Bereitstellungsmodus aus endlichen Videos entfernen. Die erforderliche Intervallabfrage oder Verarbeitung kann die Veröffentlichung verzögern.", "fr-FR" = "Supprimer les segments SponsorBlock des vidéos finies dans chaque mode de diffusion. La recherche des intervalles ou le traitement requis peut retarder la publication.", "it-IT" = "Rimuovi i segmenti SponsorBlock dai video finiti in ogni modalità di distribuzione. La ricerca degli intervalli o l'elaborazione richiesta può ritardare la pubblicazione.", pl = "Usuń segmenty SponsorBlock ze skończonych filmów w każdym trybie dostarczania. Wymagane pobranie przedziałów lub przetwarzanie może opóźnić publikację.", "pt-BR" = "Remova segmentos do SponsorBlock de vídeos finitos em todos os modos de entrega. A consulta de intervalos ou o processamento necessário pode atrasar a publicação.", "es-419" = "Elimina los segmentos de SponsorBlock de videos finitos en todos los modos de entrega. La consulta de intervalos o el procesamiento requerido puede retrasar la publicación.", "es-ES" = "Elimina los segmentos de SponsorBlock de vídeos finitos en todos los modos de entrega. La consulta de intervalos o el procesamiento requerido puede retrasar la publicación." }
+scope = "both"
+operation_targets = ["preparation", "playback"]
+applicability = "finite_only"
+kind = "boolean"
+default = true
+requires_preparation = true
 
 [entrypoints."linux-x64"]
 path = "addon.sh"

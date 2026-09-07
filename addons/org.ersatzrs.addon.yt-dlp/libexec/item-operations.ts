@@ -210,7 +210,7 @@ function fragmentPreparation(source: string) {
 
 async function prepare(request: Request, version: string): Promise<unknown> {
   const echo = identity(request, version);
-  if (!itemOptions(request.options).remove) throw new Error("preparation not requested");
+  const remove = itemOptions(request.options).remove;
   const timeout = positive(request.timeout_seconds);
   if (timeout > 3600) throw new Error("invalid timeout");
   const deadline = Date.now() + timeout * 1000;
@@ -249,7 +249,8 @@ async function prepare(request: Request, version: string): Promise<unknown> {
     ...common, "--no-simulate", "--ffmpeg-location", required(Deno.env.get("FFMPEG_BIN")),
     "--format", format, "--max-filesize", String(maximumFile), "--no-overwrites",
     "--no-write-info-json", "--no-write-thumbnail", "--no-write-subs", "--no-write-auto-subs",
-    "--sponsorblock-remove", "default", "--merge-output-format", "mkv",
+    ...(remove ? ["--sponsorblock-remove", "default"] : ["--no-sponsorblock"]),
+    "--merge-output-format", "mkv",
     // yt-dlp 2026.08.19 ModifyChaptersPP unions these ranges with SponsorBlock
     // cuts in original coordinates. --download-sections does not rebase them.
     ...fragment.arguments_,

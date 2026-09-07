@@ -38,7 +38,7 @@ if "--version" in args:
     print("2026.08.19")
 elif "-show_entries" in args:
     print(json.dumps({"format": {"duration": "12.5"}, "streams": [{"codec_type": "video"}]}))
-elif "--sponsorblock-remove" in args:
+elif "--no-simulate" in args and "--output" in args:
     path = pathlib.Path(args[args.index("--output") + 1].replace("%(ext)s", "mkv"))
     path.write_bytes(b"synthetic processed media")
     if mode == "processing-failure":
@@ -284,6 +284,19 @@ else:
                 self.assertIn("[height<=720]", args[args.index("--format") + 1])
                 self.assertNotIn(str(self.stage), result.stdout)
 
+    def test_download_ahead_without_removal_keeps_native_download_and_merge(self) -> None:
+        request = self.preparation()
+        request["options"] = self.options(remove=False)
+        result = self.invoke("prepare", request)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["duration_milliseconds"], 12500)
+        args = next(args for args in reversed(self.arguments()) if "--no-simulate" in args)
+        self.assertIn("--no-sponsorblock", args)
+        self.assertNotIn("--sponsorblock-remove", args)
+        self.assertNotIn("--sponsorblock-mark", args)
+        self.assertIn("--merge-output-format", args)
+        self.assertNotIn("--ignore-errors", args)
+
     def test_failed_processing_and_live_sources_cannot_return_artifacts(self) -> None:
         for mode in ("live", "processing-failure"):
             with self.subTest(mode=mode):
@@ -385,6 +398,7 @@ class ItemTransportTests(unittest.TestCase):
         self.assertIn("remote-stream.play.v4", capabilities)
         self.assertNotIn("remote-stream.resolve.v1", capabilities)
         self.assertIn("media-list.prepare.v1", capabilities)
+        self.assertIn("media-list.prepare.v2", capabilities)
         options = capabilities["media-list.options.v1"]["options"]
         removal = next(option for option in options if option["key"] == "sponsorblock_remove")
         self.assertEqual(removal["operation_targets"], ["preparation", "playback"])
@@ -395,7 +409,7 @@ class ItemTransportTests(unittest.TestCase):
     def test_both_entrypoints_dispatch_shared_adapter(self) -> None:
         for filename in ("addon.sh", "addon.bat"):
             source = (ADDON / filename).read_text()
-            for operation in ("runtime-info", "test-access", "interval-metadata", "resolve", "prepare", "enrich-options"):
+            for operation in ("runtime-info", "test-access", "interval-metadata", "play-intervals", "prepare", "enrich-options"):
                 self.assertIn(operation, source)
             self.assertIn("item-operations.ts", source)
 

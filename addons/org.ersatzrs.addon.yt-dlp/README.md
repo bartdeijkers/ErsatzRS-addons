@@ -74,8 +74,10 @@ The wrapper removes its private info file on normal/error completion; abrupt
 process-tree termination requires host-owned temporary-directory cleanup. Native
 yt-dlp remains the transfer owner for subsequent managed-media work.
 
-The separate full-file preparation operation uses standard
-`--sponsorblock-remove default` processing,
+The separate full-file preparation operation declares generic Download ahead
+support through `media-list.prepare.v2`. It uses native yt-dlp download/merge,
+with `--sponsorblock-remove default` only when removal is enabled and
+`--no-sponsorblock` when disabled. Enabled removal retains standard processing,
 including yt-dlp's ordinary no-segments success. Provider/API or processing
 failure cannot admit an unprocessed substitute. The final file is probed for
 duration and hashed; the host checks and owns its storage budget, cancellation,

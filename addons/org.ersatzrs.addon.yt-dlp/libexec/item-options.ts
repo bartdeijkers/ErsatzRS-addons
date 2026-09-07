@@ -28,9 +28,10 @@ export async function boundedCommand(
   args: string[],
   timeoutMilliseconds = 60_000,
   maximumOutputBytes = 4 * 1024 * 1024,
+  environment: Record<string, string> = {},
 ): Promise<{ success: boolean; stdout: string; stderr: string }> {
   const child = new Deno.Command(executable, {
-    args, stdin: "null", stdout: "piped", stderr: "piped",
+    args, env: environment, stdin: "null", stdout: "piped", stderr: "piped",
   }).spawn();
   const kill = () => { try { child.kill("SIGKILL"); } catch { /* Already exited. */ } };
   const timer = setTimeout(kill, timeoutMilliseconds);

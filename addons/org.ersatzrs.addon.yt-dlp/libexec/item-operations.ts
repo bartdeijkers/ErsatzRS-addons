@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { fileURLToPath } from "node:url";
 import { basename, join, resolve } from "node:path";
 import { boundedCommand, browserArguments, itemOptions } from "./item-options.ts";
 import { playIntervals } from "./stream-playback.ts";
@@ -179,6 +180,129 @@ async function stagingBytes(directory: string): Promise<number> {
   return bytes;
 }
 
+function subtitleLanguages(value: unknown, allowEmpty = false): string[] {
+  if (value === undefined && allowEmpty) return [];
+  if (!Array.isArray(value) || value.length > 2 || (!allowEmpty && !value.length) ||
+    value.some((language) => typeof language !== "string" || !validSubtitleLanguage(language))) {
+    throw new Error("invalid requested subtitle languages");
+  }
+  const languages = value as string[];
+  if (new Set(languages.map(logicalLanguage)).size !== languages.length) {
+    throw new Error("duplicate requested subtitle language");
+  }
+  return languages;
+}
+
+function logicalLanguage(value: string): string { return value.split("-")[0].toLowerCase(); }
+
+function validSubtitleLanguage(value: string): boolean {
+  return value.length <= 35 && /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{1,8})*$/.test(value) &&
+    !["all", "und", "zxx", "mul"].includes(logicalLanguage(value));
+}
+
+function selectedManualLanguages(info: Record<string, unknown>, requested: string[]): string[] {
+  // yt-dlp keeps automatic captions and machine translations in automatic_captions.
+  // Choose a single manual track per logical language, never the extractor's full map.
+  const subtitles = info.subtitles;
+  if (subtitles === undefined || subtitles === null) return [];
+  if (typeof subtitles !== "object" || Array.isArray(subtitles)) throw new Error("invalid subtitle metadata");
+  const available = Object.keys(subtitles).filter((language) => validSubtitleLanguage(language) &&
+    Array.isArray((subtitles as Record<string, unknown>)[language]) &&
+    ((subtitles as Record<string, unknown[]>)[language]).length > 0).sort();
+  return requested.flatMap((language) => {
+    const exact = available.find((actual) => actual.toLowerCase() === language.toLowerCase());
+    const primary = available.find((actual) => actual.toLowerCase() === logicalLanguage(language));
+    const regional = available.find((actual) => logicalLanguage(actual) === logicalLanguage(language));
+    const chosen = exact ?? primary ?? regional;
+    return chosen ? [chosen] : [];
+  });
+}
+
+function subtitleArguments(languages: string[]): string[] {
+  if (!languages.length) return ["--no-write-subs", "--no-write-auto-subs"];
+  // Restricted anchored expressions: tags have already rejected regex punctuation.
+  return ["--write-subs", "--no-write-auto-subs", "--sub-langs",
+    languages.map((language) => "^" + language + "$").join(","),
+    "--sub-format", "srt/vtt/ttml/ass/ssa", "--convert-subs", "srt"];
+}
+
+async function subtitleArtifacts(
+  value: unknown, languages: string[], stage: string, maximumFile: number,
+  remaining: () => number, timeline: "source" | "prepared",
+): Promise<Record<string, unknown>[]> {
+  if (value === undefined || value === null) return [];
+  if (typeof value !== "object" || Array.isArray(value)) throw new Error("invalid subtitle result");
+  const artifacts: Record<string, unknown>[] = [];
+  for (const [language, raw] of Object.entries(value)) {
+    if (!languages.includes(language) || !raw || typeof raw !== "object" || Array.isArray(raw)) {
+      throw new Error("unrequested subtitle result");
+    }
+    const subtitle = raw as Record<string, unknown>;
+    if (subtitle.ext !== "srt") throw new Error("subtitle conversion did not produce SRT");
+    const path = resolve(required(subtitle.filepath));
+    const relativePath = basename(path);
+    if (path !== join(stage, relativePath) || !/^(?:prepared|subtitles)\.[A-Za-z0-9-]+\.srt$/.test(relativePath)) {
+      throw new Error("invalid subtitle path");
+    }
+    const fileInfo = await Deno.lstat(path);
+    if (!fileInfo.isFile || fileInfo.isSymlink || fileInfo.size <= 0 || fileInfo.size > maximumFile) {
+      throw new Error("subtitle exceeds budget");
+    }
+    const digest = createHash("sha256");
+    const file = await Deno.open(path, { read: true });
+    for await (const chunk of file.readable) { remaining(); digest.update(chunk); }
+    artifacts.push({ language, format: "srt", provenance: "manual", timeline,
+      relative_path: relativePath, byte_length: fileInfo.size, sha256: digest.digest("hex") });
+  }
+  return artifacts;
+}
+
+async function subtitles(request: Request, version: string): Promise<unknown> {
+  const echo = identity(request, version);
+  const requested = subtitleLanguages(request.requested_languages);
+  const timeout = positive(request.timeout_seconds);
+  if (timeout > 3600) throw new Error("invalid timeout");
+  const deadline = Date.now() + timeout * 1000;
+  const remaining = () => {
+    const value = deadline - Date.now();
+    if (value <= 0) throw new Error("subtitle acquisition timed out");
+    return value;
+  };
+  const maximumFile = positive(request.maximum_file_bytes);
+  const maximumStaging = positive(request.maximum_staging_bytes);
+  if (maximumStaging < maximumFile) throw new Error("invalid staging budget");
+  const stage = resolve(required(request.staging_directory));
+  const stageInfo = await Deno.lstat(stage);
+  if (!stageInfo.isDirectory || stageInfo.isSymlink) throw new Error("invalid staging directory");
+  for await (const _entry of Deno.readDir(stage)) throw new Error("staging directory must be empty");
+  // Keep complete source coordinates. The host owns streamed chapter/SponsorBlock mapping.
+  const source = fragmentPreparation(sourceUrl(request)).source;
+  const common = providerArguments(request);
+  const probe = await boundedCommand(ytDlp, [
+    ...common, "--simulate", "--skip-download", "--dump-single-json",
+    "--format", "bestvideo*+bestaudio/best", "--no-sponsorblock", source,
+  ], Math.min(remaining(), 60_000));
+  if (!probe.success) throw new Error("subtitle metadata probe failed");
+  const info = JSON.parse(probe.stdout);
+  if (!info || typeof info !== "object" || Array.isArray(info)) throw new Error("invalid subtitle metadata");
+  const languages = selectedManualLanguages(info, requested);
+  if (!languages.length) return { ...echo, subtitles: [] };
+  const result = await boundedCommand(ytDlp, [
+    ...common, "--no-simulate", "--skip-download", "--ffmpeg-location", required(Deno.env.get("FFMPEG_BIN")),
+    "--format", "bestvideo*+bestaudio/best",
+    "--max-filesize", String(maximumFile), "--no-overwrites", "--no-sponsorblock",
+    "--no-write-info-json", "--no-write-thumbnail", ...subtitleArguments(languages),
+    "--output", join(stage, "subtitles.%(ext)s"),
+    // skip_download runs before_dl conversion and MoveFiles, but not after_move PPs.
+    "--print", "after_video:%(requested_subtitles)j", source,
+  ], remaining(), 64 * 1024);
+  if (!result.success) throw new Error("subtitle acquisition failed");
+  if (await stagingBytes(stage) > maximumStaging) throw new Error("subtitle staging exceeds budget");
+  const artifacts = await subtitleArtifacts(JSON.parse(result.stdout.trim()), languages,
+    stage, maximumFile, remaining, "source");
+  return { ...echo, subtitles: artifacts };
+}
+
 function fragmentPreparation(source: string) {
   // Match the start/end query convention used by fragment-playback.ts. These
   // are original-source coordinates, never offsets in an already cut artifact.
@@ -205,11 +329,17 @@ function fragmentPreparation(source: string) {
   const arguments_: string[] = [];
   if (start > 0) arguments_.push("--remove-chapters", `*0-${start}`);
   if (end !== undefined) arguments_.push("--remove-chapters", `*${end}-inf`);
+  // yt-dlp 2026.08.19 parses time ranges separately but only registers
+  // ModifyChaptersPP for a chapter regex or SponsorBlock. This impossible
+  // pattern activates the native cutter without selecting any extra chapters
+  // or enabling SponsorBlock when the operator has disabled it.
+  if (arguments_.length) arguments_.push("--remove-chapters", "(?!)");
   return { source: url.toString(), start, arguments_ };
 }
 
 async function prepare(request: Request, version: string): Promise<unknown> {
   const echo = identity(request, version);
+  const requestedLanguages = subtitleLanguages(request.requested_subtitle_languages, true);
   const remove = itemOptions(request.options).remove;
   const timeout = positive(request.timeout_seconds);
   if (timeout > 3600) throw new Error("invalid timeout");
@@ -243,20 +373,23 @@ async function prepare(request: Request, version: string): Promise<unknown> {
   if (typeof info.duration === "number" && info.duration > 0 && fragment.start >= info.duration) {
     throw new Error("fragment starts beyond the source");
   }
+  const languages = selectedManualLanguages(info, requestedLanguages);
   // Standard yt-dlp processing: 404/no segments is a success, exhausted API
   // retries and FFmpeg errors remain failures. No --ignore-errors or stdout media.
   const download = await boundedCommand(ytDlp, [
     ...common, "--no-simulate", "--ffmpeg-location", required(Deno.env.get("FFMPEG_BIN")),
+    "--no-plugin-dirs", "--plugin-dirs", fileURLToPath(new URL("./plugins", import.meta.url)),
+    "--use-postprocessor", "ErsatzRSChapterGuard:when=before_dl",
     "--format", format, "--max-filesize", String(maximumFile), "--no-overwrites",
-    "--no-write-info-json", "--no-write-thumbnail", "--no-write-subs", "--no-write-auto-subs",
+    "--no-write-info-json", "--no-write-thumbnail", ...subtitleArguments(languages),
     ...(remove ? ["--sponsorblock-remove", "default"] : ["--no-sponsorblock"]),
     "--merge-output-format", "mkv",
     // yt-dlp 2026.08.19 ModifyChaptersPP unions these ranges with SponsorBlock
     // cuts in original coordinates. --download-sections does not rebase them.
     ...fragment.arguments_,
     "--output", join(stage, "prepared.%(ext)s"),
-    "--print", 'after_move:{"path":%(filepath)j,"format":%(format_id)j}', source,
-  ], remaining(), 64 * 1024);
+    "--print", 'after_move:{"path":%(filepath)j,"format":%(format_id)j,"subtitles":%(requested_subtitles|{})j}', source,
+  ], remaining(), 64 * 1024, { PYTHONDONTWRITEBYTECODE: "1", YTDLP_NO_PLUGINS: "" });
   // ModifyChaptersPP warns and leaves the original file when all content would
   // be removed. That successful process exit must not admit an uncut substitute.
   if (!download.success || /You have requested to remove the entire video/i.test(download.stderr)) {
@@ -285,9 +418,13 @@ async function prepare(request: Request, version: string): Promise<unknown> {
   const digest = createHash("sha256");
   const file = await Deno.open(path, { read: true });
   for await (const chunk of file.readable) { remaining(); digest.update(chunk); }
+  // yt-dlp converts in before_dl, then ModifyChaptersPP cuts video and supported
+  // sidecars together. These descriptors are already on the prepared file clock.
+  const artifacts = await subtitleArtifacts(result.subtitles, languages, stage, maximumFile, remaining, "prepared");
   return {
     ...echo, selected_format: result.format, relative_path: relativePath,
     byte_length: fileInfo.size, sha256: digest.digest("hex"), duration_milliseconds: duration,
+    ...(artifacts.length ? { subtitles: artifacts } : {}),
   };
 }
 
@@ -307,6 +444,7 @@ try {
       Deno.exit(0);
       break;
     case "prepare": result = await prepare(request, version); break;
+    case "subtitles": result = await subtitles(request, version); break;
     default: throw new Error("unsupported operation");
   }
   await Deno.stdout.write(encoder.encode(JSON.stringify(result) + "\n"));

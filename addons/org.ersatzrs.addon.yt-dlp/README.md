@@ -6,6 +6,23 @@ operator-installed yt-dlp. Always download or update to the
 before configuring the add-on. ErsatzRS supplies its managed FFmpeg runtime;
 yt-dlp is deliberately not bundled or updated automatically by the add-on.
 
+Prepared downloads load only this package's local yt-dlp postprocessor plugin;
+they do not load default plugin directories or replace the installed executable.
+The plugin subclasses the stock chapter cutter: native yt-dlp still owns media
+downloads, merging and SponsorBlock cuts. It corrects range handling and clips
+manual SRT cues on the same retained timeline without losing font, color or
+positioning markup. Captions entirely removed by cuts are valid absence, not a
+failed download. The preparation child disables Python bytecode writes so the
+installed add-on package stays unchanged. Subtitle-only acquisition does not
+activate the plugin or download video/audio.
+
+The stock-runtime regression is
+`python -m unittest discover -s tests -p test_yt_dlp_item_operations.py`;
+the native preparation test requires installed yt-dlp and explicit
+`FFMPEG_BIN`/`FFPROBE_BIN` or those tools on `PATH`. Cue-only regressions live in
+`tests/test_yt_dlp_caption_plugin.py`. All media fixtures are temporary and all
+native fixture transfers are local files; provider network access is rejected.
+
 ## Prerequisites
 
 Two programs must be installed by the operator and discoverable on the `PATH`
@@ -95,7 +112,25 @@ content, preparation fails instead of admitting the unchanged original.
 
 Both platform entrypoints use the same Deno adapters. The host supplies managed
 FFmpeg and ffprobe, and limits the child process tree and staging usage during
-preparation. No subtitle acquisition or automatic yt-dlp update is added here.
+preparation. Automatic yt-dlp updates remain disabled.
+
+`media-list.subtitles.v1` adds a separate `subtitles` operation that acquires
+only explicitly requested manual subtitle tracks with `--skip-download`,
+`--write-subs`, and `--no-write-auto-subs`. It accepts at most two distinct
+canonical primary/fallback languages. Native metadata selects one exact track,
+or a deterministic regional match, per requested language; automatic captions,
+machine translations and unrelated languages are never fallbacks. Successful
+absence returns an empty artifact list. The host owns scratch storage, process
+termination, byte quotas, caching and publication.
+
+The operation converts manual tracks to SRT with native yt-dlp/FFmpeg and returns
+their actual language, manual provenance, relative path, size and digest on the
+original source clock. Optional `requested_subtitle_languages` on preparation
+acquires the same selected tracks before native `ModifyChaptersPP` cuts video
+and sidecars together. Preparation descriptors use the final prepared clock;
+the host must not apply source offsets again. Empty optional request/result
+fields preserve legacy preparation JSON. A requested conversion or processing
+failure never admits an out-of-sync subtitle substitute.
 
 For live HLS playback, play contract v2 accepts a host-selected maximum video
 height. ErsatzRS normally requests up to 1080p and can temporarily retry at

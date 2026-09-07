@@ -18,6 +18,7 @@ if /i "%OPERATION%"=="test-access" goto :item_operation
 if /i "%OPERATION%"=="interval-metadata" goto :item_operation
 if /i "%OPERATION%"=="play-intervals" goto :item_operation
 if /i "%OPERATION%"=="prepare" goto :item_operation
+if /i "%OPERATION%"=="subtitles" goto :item_operation
 if /i "%OPERATION%"=="list" goto :list
 if /i "%OPERATION%"=="item" goto :item
 if /i "%OPERATION%"=="play" goto :play

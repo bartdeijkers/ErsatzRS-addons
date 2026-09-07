@@ -113,7 +113,7 @@ case "$operation" in
             printf '%s\n' '{"status":"ready","code":"ready","message":"yt-dlp Remote Streams is ready."}'
         fi
         ;;
-    runtime-info | test-access | interval-metadata | play-intervals | prepare)
+    runtime-info | test-access | interval-metadata | play-intervals | prepare | subtitles)
         YT_DLP_BIN=$yt_dlp export YT_DLP_BIN
         deno run --quiet --allow-env --allow-run --allow-read --allow-write \
             "$script_dir/libexec/item-operations.ts" "$operation"

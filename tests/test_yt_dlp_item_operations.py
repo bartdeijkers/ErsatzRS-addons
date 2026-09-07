@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import shlex
 import shutil
@@ -38,7 +39,16 @@ if "--version" in args:
     print("2026.08.19")
 elif "-show_entries" in args:
     print(json.dumps({"format": {"duration": "12.5"}, "streams": [{"codec_type": "video"}]}))
-elif "--no-simulate" in args and "--output" in args:
+elif "--no-simulate" in args and "--skip-download" in args and "--write-subs" in args:
+    template = args[args.index("--output") + 1]
+    tracks = {}
+    for language in args[args.index("--sub-langs") + 1].split(","):
+        language = language.removeprefix("^").removesuffix("$")
+        path = pathlib.Path(template.replace(".%(ext)s", "." + language + ".srt"))
+        path.write_bytes(b"1\\n00:00:03,000 --> 00:00:05,000\\nManual fixture\\n")
+        tracks[language] = {"ext": "srt", "filepath": str(path)}
+    print(json.dumps(tracks))
+elif "--no-simulate" in args and "--output" in args and args[args.index("--output") + 1] != "-":
     path = pathlib.Path(args[args.index("--output") + 1].replace("%(ext)s", "mkv"))
     path.write_bytes(b"synthetic processed media")
     if mode == "processing-failure":
@@ -48,7 +58,14 @@ elif "--no-simulate" in args and "--output" in args:
         sys.stderr.write("SponsorBlock: no matching segments")
     if mode == "entire-video":
         sys.stderr.write("WARNING: You have requested to remove the entire video, which is not possible")
-    print(json.dumps({"path": str(path), "format": "137+140"}))
+    tracks = {}
+    if "--write-subs" in args:
+        for language in args[args.index("--sub-langs") + 1].split(","):
+            language = language.removeprefix("^").removesuffix("$")
+            subtitle_path = path.with_suffix("." + language + ".srt")
+            subtitle_path.write_bytes(b"1\\n00:00:01,000 --> 00:00:03,000\\nPrepared fixture\\n")
+            tracks[language] = {"ext": "srt", "filepath": str(subtitle_path)}
+    print(json.dumps({"path": str(path), "format": "137+140", "subtitles": tracks}))
 elif "--sponsorblock-mark" in args:
     if mode == "metadata-invalid-json":
         print("SYNTHETIC_PRIVATE_DIAGNOSTIC")
@@ -129,6 +146,84 @@ else:
 
     def interval_request(self) -> dict:
         return dict(self.request("firefox"), options=self.options("firefox", True))
+
+    def subtitle_request(self) -> dict:
+        return dict(self.request("firefox"), requested_languages=["en", "nl"],
+                    staging_directory=str(self.stage), maximum_file_bytes=1024,
+                    maximum_staging_bytes=4096, timeout_seconds=10)
+
+    def manual_subtitle_metadata(self) -> None:
+        self.environment["FIXTURE_RESOLVE"] = json.dumps({
+            "duration": 100, "live_status": "not_live",
+            "subtitles": {"nl-NL": [{"ext": "vtt"}], "en-US": [{"ext": "vtt"}],
+                          "en": [{"ext": "srt"}], "de": [{"ext": "srt"}]},
+            "automatic_captions": {"fr": [{"ext": "vtt"}]},
+        })
+
+    def test_subtitle_only_download_is_manual_explicit_bounded_and_source_clock(self) -> None:
+        self.manual_subtitle_metadata()
+        request = self.subtitle_request()
+        request["source_url"] += "&start=10&end=90"
+        result = self.invoke("subtitles", request)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        output = json.loads(result.stdout)
+        self.assertEqual([track["language"] for track in output["subtitles"]], ["en", "nl-NL"])
+        for track in output["subtitles"]:
+            self.assertEqual((track["format"], track["provenance"], track["timeline"]),
+                             ("srt", "manual", "source"))
+            content = (self.stage / track["relative_path"]).read_bytes()
+            self.assertEqual(track["byte_length"], len(content))
+            self.assertEqual(track["sha256"], hashlib.sha256(content).hexdigest())
+        args = self.arguments()[-1]
+        for argument in ("--skip-download", "--write-subs", "--no-write-auto-subs", "--no-sponsorblock"):
+            self.assertIn(argument, args)
+        self.assertEqual(args[args.index("--sub-langs") + 1], "^en$,^nl-NL$")
+        self.assertEqual(args[args.index("--convert-subs") + 1], "srt")
+        self.assertEqual(args[args.index("--print") + 1], "after_video:%(requested_subtitles)j")
+        self.assertEqual(args[-1], "https://www.youtube.com/watch?v=fixture")
+        self.assertNotIn("--remove-chapters", args)
+        self.assertTrue(all(path.suffix == ".srt" for path in self.stage.iterdir()))
+        self.assertNotIn(str(self.root), result.stdout + result.stderr)
+
+    def test_subtitle_absence_never_falls_back_to_auto_or_unrelated_language(self) -> None:
+        self.manual_subtitle_metadata()
+        request = dict(self.subtitle_request(), requested_languages=["fr"])
+        result = self.invoke("subtitles", request)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["subtitles"], [])
+        self.assertFalse(any("--output" in args for args in self.arguments()))
+        self.assertEqual(list(self.stage.iterdir()), [])
+
+    def test_subtitle_languages_reject_download_all_and_excess_requests(self) -> None:
+        for languages in ([], ["all"], ["en.*"], ["en", "nl", "de"], ["en", "en-US"]):
+            with self.subTest(languages=languages):
+                result = self.invoke("subtitles", dict(self.subtitle_request(), requested_languages=languages))
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(list(self.stage.iterdir()), [])
+        self.assertFalse(any("--dump-single-json" in args for args in self.arguments()))
+
+    def test_prepared_subtitles_share_native_cut_arguments_and_final_clock(self) -> None:
+        self.manual_subtitle_metadata()
+        request = self.preparation()
+        request["requested_subtitle_languages"] = ["en", "nl"]
+        request["source_url"] += "&start=10&end=90"
+        result = self.invoke("prepare", request)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        tracks = json.loads(result.stdout)["subtitles"]
+        self.assertEqual([track["language"] for track in tracks], ["en", "nl-NL"])
+        self.assertTrue(all(track["timeline"] == "prepared" for track in tracks))
+        download = next(args for args in self.arguments() if "--no-simulate" in args)
+        for argument in ("--write-subs", "--no-write-auto-subs", "--convert-subs",
+                         "--sponsorblock-remove", "--remove-chapters"):
+            self.assertIn(argument, download)
+        self.assertNotIn("--skip-download", download)
+        self.assertEqual(download[download.index("--sub-langs") + 1], "^en$,^nl-NL$")
+
+    def test_subtitle_artifact_size_limit_rejects_successful_child_output(self) -> None:
+        self.manual_subtitle_metadata()
+        result = self.invoke("subtitles", dict(self.subtitle_request(), maximum_file_bytes=1))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "")
 
     def test_interval_metadata_is_artifact_free_and_matches_removal_categories(self) -> None:
         request = self.interval_request()
@@ -296,6 +391,24 @@ else:
         self.assertNotIn("--sponsorblock-mark", args)
         self.assertIn("--merge-output-format", args)
         self.assertNotIn("--ignore-errors", args)
+        self.assertNotIn("--remove-chapters", args)
+
+    def test_fragment_without_sponsorblock_activates_only_native_range_cutter(self) -> None:
+        request = self.preparation()
+        request["options"] = self.options(remove=False)
+        request["source_url"] += "&start=10&end=60"
+        result = self.invoke("prepare", request)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        args = next(args for args in reversed(self.arguments()) if "--no-simulate" in args)
+        self.assertIn("--no-sponsorblock", args)
+        self.assertNotIn("--sponsorblock-remove", args)
+        self.assertNotIn("--sponsorblock-mark", args)
+        self.assertIn("--no-plugin-dirs", args)
+        self.assertEqual(Path(args[args.index("--plugin-dirs") + 1]), ADDON / "libexec" / "plugins")
+        self.assertEqual(args[args.index("--use-postprocessor") + 1],
+                         "ErsatzRSChapterGuard:when=before_dl")
+        self.assertEqual([args[index + 1] for index, arg in enumerate(args)
+                          if arg == "--remove-chapters"], ["*0-10", "*60-inf", "(?!)"])
 
     def test_failed_processing_and_live_sources_cannot_return_artifacts(self) -> None:
         for mode in ("live", "processing-failure"):
@@ -331,7 +444,9 @@ else:
                 self.assertEqual(result.returncode, 0, result.stderr)
                 args = next(args for args in reversed(self.arguments()) if "--sponsorblock-remove" in args)
                 actual = [args[index + 1] for index, arg in enumerate(args) if arg == "--remove-chapters"]
-                self.assertEqual(actual, expected)
+                self.assertEqual(actual, expected + ["(?!)"])
+                for title in ("", "Chapter", "Sponsor", "(?!)", "First\nSecond"):
+                    self.assertIsNone(re.search(actual[-1], title))
                 self.assertNotIn("--download-sections", args)
                 self.assertEqual(args[-1], "https://www.youtube.com/watch?v=fixture")
                 self.assertEqual(json.loads(result.stdout)["duration_milliseconds"], 12500)
@@ -399,6 +514,7 @@ class ItemTransportTests(unittest.TestCase):
         self.assertNotIn("remote-stream.resolve.v1", capabilities)
         self.assertIn("media-list.prepare.v1", capabilities)
         self.assertIn("media-list.prepare.v2", capabilities)
+        self.assertIn("media-list.subtitles.v1", capabilities)
         options = capabilities["media-list.options.v1"]["options"]
         removal = next(option for option in options if option["key"] == "sponsorblock_remove")
         self.assertEqual(removal["operation_targets"], ["preparation", "playback"])
@@ -409,12 +525,176 @@ class ItemTransportTests(unittest.TestCase):
     def test_both_entrypoints_dispatch_shared_adapter(self) -> None:
         for filename in ("addon.sh", "addon.bat"):
             source = (ADDON / filename).read_text()
-            for operation in ("runtime-info", "test-access", "interval-metadata", "play-intervals", "prepare", "enrich-options"):
+            for operation in ("runtime-info", "test-access", "interval-metadata", "play-intervals", "prepare", "subtitles", "enrich-options"):
                 self.assertIn(operation, source)
             self.assertIn("item-operations.ts", source)
 
 
 class InstalledYtDlpMetadataTests(unittest.TestCase):
+    def test_real_prepare_merges_converts_and_cuts_manual_subtitle_clock(self) -> None:
+        installed = shutil.which("yt-dlp")
+        ffmpeg = os.environ.get("FFMPEG_BIN") or shutil.which("ffmpeg")
+        ffprobe = os.environ.get("FFPROBE_BIN") or shutil.which("ffprobe")
+        self.assertTrue(installed and zipfile.is_zipfile(installed), "Python-zip yt-dlp is required")
+        self.assertTrue(ffmpeg and Path(ffmpeg).is_file(), "FFMPEG_BIN or installed ffmpeg is required")
+        self.assertTrue(ffprobe and Path(ffprobe).is_file(), "FFPROBE_BIN or installed ffprobe is required")
+        program = r'''
+import contextlib, hashlib, io, json, pathlib, re, subprocess, sys, tempfile
+from unittest.mock import patch
+sys.path.insert(0, sys.argv[1])
+import yt_dlp
+ffmpeg, ffprobe = sys.argv[2:4]
+plugin_directory = sys.argv[4]
+sys.dont_write_bytecode = True
+def command(args):
+    return subprocess.run(args, check=True, capture_output=True, text=True, timeout=60)
+with tempfile.TemporaryDirectory() as directory:
+    root = pathlib.Path(directory)
+    stage = root / "stage"
+    stage.mkdir()
+    video, audio = root / "video.mp4", root / "audio.m4a"
+    command([ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
+        "-f", "lavfi", "-i", "color=c=black:s=64x64:r=10:d=12", "-an",
+        "-c:v", "mpeg4", "-g", "1", "-q:v", "10", str(video)])
+    command([ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
+        "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo", "-t", "12",
+        "-vn", "-c:a", "aac", str(audio)])
+    vtt = "WEBVTT\n\n00:00:00.500 --> 00:00:01.000\nBefore fragment\n\n00:00:02.500 --> 00:00:03.000\nFirst retained\n\n00:00:03.500 --> 00:00:04.500\nCrossing cut\n\n00:00:05.000 --> 00:00:05.500\nInside cut\n\n00:00:07.000 --> 00:00:08.000\nAfter cut\n\n00:00:11.000 --> 00:00:11.500\nAfter fragment\n"
+    info = {"id": "fixture", "title": "Fixture", "extractor": "generic", "extractor_key": "Generic",
+        "duration": 12, "live_status": "not_live", "is_live": False,
+        "formats": [
+            {"format_id": "video", "url": video.as_uri(), "ext": "mp4", "protocol": "file",
+             "vcodec": "mpeg4", "acodec": "none", "height": 64},
+            {"format_id": "audio", "url": audio.as_uri(), "ext": "m4a", "protocol": "file",
+             "vcodec": "none", "acodec": "aac"}],
+        "subtitles": {"en-US": [{"ext": "vtt", "data": vtt}]}}
+    info_path = root / "info.json"
+    info_path.write_text(json.dumps(info), encoding="utf-8")
+    args = ["--no-config", "--no-update", "--no-cache-dir", "--quiet", "--no-progress",
+        "--no-simulate", "--no-playlist", "--abort-on-error", "--no-sponsorblock",
+        "--enable-file-urls", "--ffmpeg-location", ffmpeg,
+        "--no-plugin-dirs", "--plugin-dirs", plugin_directory,
+        "--use-postprocessor", "ErsatzRSChapterGuard:when=before_dl",
+        "--format", "bestvideo[height<=1080]+bestaudio/best[height<=1080][vcodec!=none][acodec!=none]",
+        "--merge-output-format", "mkv", "--no-overwrites", "--max-filesize", "10485760",
+        "--no-write-info-json", "--no-write-thumbnail", "--write-subs", "--no-write-auto-subs",
+        "--sub-langs", "^en-US$", "--sub-format", "srt/vtt/ttml/ass/ssa", "--convert-subs", "srt",
+        "--remove-chapters", "*0-2", "--remove-chapters", "*4-6", "--remove-chapters", "*10-inf",
+        "--remove-chapters", "(?!)",
+        "--output", str(stage / "prepared.%(ext)s"),
+        "--print", 'after_move:{"path":%(filepath)j,"format":%(format_id)j,"subtitles":%(requested_subtitles|{})j}']
+    parsed = yt_dlp.parse_options(args)
+    # Mirror CLI plugin setup; the executable and built-in implementation remain stock.
+    from yt_dlp.globals import plugin_dirs
+    from yt_dlp.plugins import load_all_plugins
+    from yt_dlp.postprocessor import get_postprocessor
+    plugin_dirs.value = parsed.options.plugin_dirs
+    load_all_plugins()
+    assert get_postprocessor('ModifyChapters').__module__.startswith('yt_dlp_plugins.'), 'plugin not loaded'
+    original_urlopen = yt_dlp.YoutubeDL.urlopen
+    def local_only(self, request):
+        url = request if isinstance(request, str) else request.url
+        assert url.startswith("file:"), "unexpected network request"
+        return original_urlopen(self, request)
+    output = io.StringIO()
+    with patch.object(yt_dlp.YoutubeDL, "urlopen", local_only), contextlib.redirect_stdout(output):
+        with yt_dlp.YoutubeDL(parsed.ydl_opts) as downloader:
+            assert downloader.download_with_info_file(str(info_path)) == 0
+    result = json.loads(output.getvalue())
+    assert result["format"] == "video+audio", result
+    media_path = pathlib.Path(result["path"])
+    media = json.loads(command([ffprobe, "-v", "error", "-show_entries",
+        "format=duration:stream=codec_type", "-of", "json", str(media_path)]).stdout)
+    assert {s["codec_type"] for s in media["streams"]} == {"video", "audio"}, media
+    assert abs(float(media["format"]["duration"]) - 6) < 0.3, media
+    track = result["subtitles"]["en-US"]
+    assert track["ext"] == "srt", track
+    path = pathlib.Path(track["filepath"])
+    assert path == stage / "prepared.en-US.srt", path
+    content = path.read_text(encoding="utf-8")
+    cues = {}
+    for block in re.split(r"\n\s*\n", content.strip()):
+        lines = block.splitlines()
+        cues["\n".join(lines[2:])] = lines[1]
+    assert cues["First retained"] == "00:00:00,500 --> 00:00:01,000", cues
+    assert cues["After cut"] == "00:00:03,000 --> 00:00:04,000", cues
+    assert not {"Before fragment", "Inside cut", "After fragment"}.intersection(cues), cues
+    # Observe native boundary behavior without assuming that concat splits cues.
+    print("native crossing cue: " + str(cues.get("Crossing cut")))
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    assert digest != hashlib.sha256(vtt.encode()).hexdigest()
+    assert not list(stage.glob("*.vtt")), list(stage.iterdir())
+    assert not list(stage.glob("*.uncut.*")), list(stage.iterdir())
+    empty_stage = root / "empty-stage"
+    empty_stage.mkdir()
+    info['subtitles']['en-US'][0]['data'] = "WEBVTT\n\n00:00:05.000 --> 00:00:05.500\nRemoved\n"
+    info_path.write_text(json.dumps(info), encoding='utf-8')
+    args[args.index('--output') + 1] = str(empty_stage / 'prepared.%(ext)s')
+    empty_output = io.StringIO()
+    with patch.object(yt_dlp.YoutubeDL, 'urlopen', local_only), contextlib.redirect_stdout(empty_output):
+        with yt_dlp.YoutubeDL(yt_dlp.parse_options(args).ydl_opts) as downloader:
+            assert downloader.download_with_info_file(str(info_path)) == 0
+    empty_result = json.loads(empty_output.getvalue())
+    assert empty_result['subtitles'] == {}, empty_result
+    assert pathlib.Path(empty_result['path']).is_file()
+    assert not list(empty_stage.glob('*.srt')), list(empty_stage.iterdir())
+    print("offline native merge/conversion/caption cuts passed; sha256=" + digest)
+'''
+        result = subprocess.run([sys.executable, "-I", "-c", program, installed, ffmpeg, ffprobe,
+                                 str(ADDON / "libexec" / "plugins")],
+                                capture_output=True, text=True, timeout=180)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("offline native merge/conversion/caption cuts passed", result.stdout)
+        print(result.stdout.strip())
+
+    def test_real_skip_download_writes_only_manual_srt_and_prints_final_descriptors(self) -> None:
+        installed = shutil.which("yt-dlp")
+        if not installed or not zipfile.is_zipfile(installed):
+            self.skipTest("An installed Python-zip yt-dlp executable is required")
+        program = r'''
+import contextlib, io, json, pathlib, sys, tempfile
+from unittest.mock import patch
+sys.path.insert(0, sys.argv[1])
+import yt_dlp
+cue = "1\n00:00:03,000 --> 00:00:05,000\nManual fixture\n"
+info = {"id": "fixture", "title": "Fixture", "extractor": "generic", "extractor_key": "Generic",
+        "duration": 20, "live_status": "not_live", "is_live": False,
+        "formats": [{"format_id": "fixture", "url": "https://example.invalid/fixture.mp4",
+                     "ext": "mp4", "vcodec": "avc1", "acodec": "mp4a", "protocol": "https"}],
+        "subtitles": {"en": [{"ext": "srt", "data": cue}],
+                      "de": [{"ext": "srt", "data": "unrequested"}]},
+        "automatic_captions": {"nl": [{"ext": "srt", "data": "automatic"}]}}
+with tempfile.TemporaryDirectory() as directory:
+    stage = pathlib.Path(directory)
+    info_path = stage / "info.json"
+    info_path.write_text(json.dumps(info), encoding="utf-8")
+    arguments = ["--no-config", "--no-update", "--no-cache-dir", "--quiet",
+        "--no-simulate", "--skip-download", "--no-playlist", "--no-sponsorblock",
+        "--format", "bestvideo*+bestaudio/best",
+        "--write-subs", "--no-write-auto-subs", "--sub-langs", "^en$,^nl$",
+        "--sub-format", "srt/vtt/ttml/ass/ssa", "--convert-subs", "srt",
+        "--output", str(stage / "subtitles.%(ext)s"),
+        "--print", "after_video:%(requested_subtitles)j"]
+    parsed = yt_dlp.parse_options(arguments)
+    output = io.StringIO()
+    with patch.object(yt_dlp.YoutubeDL, "urlopen", side_effect=AssertionError("unexpected network")), \
+         patch("subprocess.Popen", side_effect=AssertionError("unexpected media process")), \
+         contextlib.redirect_stdout(output):
+        with yt_dlp.YoutubeDL(parsed.ydl_opts) as downloader:
+            code = downloader.download_with_info_file(str(info_path))
+    assert code == 0
+    result = json.loads(output.getvalue())
+    assert list(result) == ["en"], result
+    assert result["en"]["ext"] == "srt"
+    assert pathlib.Path(result["en"]["filepath"]).read_text() == cue
+    assert sorted(path.name for path in stage.iterdir()) == ["info.json", "subtitles.en.srt"]
+print("installed yt-dlp manual subtitle-only acquisition passed")
+'''
+        result = subprocess.run([sys.executable, "-I", "-c", program, installed],
+                                capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("manual subtitle-only acquisition passed", result.stdout)
+
     def test_real_preprocessing_is_metadata_only_and_uses_removal_categories(self) -> None:
         installed = shutil.which("yt-dlp")
         if not installed or not zipfile.is_zipfile(installed):

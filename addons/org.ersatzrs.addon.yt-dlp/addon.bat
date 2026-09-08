@@ -26,6 +26,7 @@ call :fail operation-failed "Unsupported add-on operation." 64
 exit /b 64
 
 :check
+if "%ERSATZRS_ADDON_CAPABILITY%"=="media-list.source-check.v1" goto :source_check
 call :require_program "%YT_DLP_BIN%"
 if errorlevel 1 goto :missing
 call :require_program "%FFMPEG_BIN%"
@@ -36,6 +37,10 @@ call :require_program "deno.exe"
 if errorlevel 1 goto :missing_js_runtime
 echo {"status":"ready","code":"ready","message":"yt-dlp Remote Streams is ready."}
 exit /b 0
+
+:source_check
+deno.exe run --quiet --allow-env=YT_DLP_BIN --allow-run "%~dp0libexec\source-check.ts"
+exit /b %ERRORLEVEL%
 
 :media_list_import
 call :require_program "%YT_DLP_BIN%"

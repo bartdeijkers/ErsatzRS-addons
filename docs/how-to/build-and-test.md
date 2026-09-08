@@ -45,6 +45,31 @@ Install Deno before running the complete provider-adapter coverage. Some
 platform- or runtime-specific cases are skipped when their declared external
 runtime is unavailable.
 
+## Verify adaptive source checks
+
+Run the normalized fixtures, POSIX or Windows entrypoint, bounded-output,
+deadline, cancellation and bundle tests:
+
+```sh
+python3 -m unittest discover -s tests -p test_yt_dlp_source_check.py
+```
+
+On Windows without Python, use the native executable fixture (Deno and Windows
+PowerShell required):
+
+```powershell
+powershell.exe -NoProfile -File tests/test_yt_dlp_source_check_windows.ps1
+```
+
+For newer capabilities unsupported by the pinned standalone validator, use the
+current ErsatzRS checkout's `cargo xtask validate-addon-manifest <addon.toml>`.
+The host's ignored `installed_yt_dlp_candidate_adaptive_unchanged_then_changed`
+test accepts `ERSATZRS_YT_DLP_CANDIDATE=<package-directory>` and installs a copy
+in a throwaway database. It checks the Adaptive capability predicate and real
+scheduler admission with synthetic extraction; it does not alter an operator's
+installation. Run it through the host's `./run.sh test -p ersatzrs-infra --lib
+installed_yt_dlp_candidate_adaptive --run-ignored ignored-only` wrapper.
+
 ## Validate manifests on Linux x86-64
 
 The checked-in host validator is a Linux x86-64 binary. Verify its digest from

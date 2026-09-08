@@ -101,6 +101,11 @@ run_media_list_import() {
 
 case "$operation" in
     check)
+        if [ "${ERSATZRS_ADDON_CAPABILITY:-}" = "media-list.source-check.v1" ]; then
+            YT_DLP_BIN=$yt_dlp export YT_DLP_BIN
+            exec deno run --quiet --allow-env=YT_DLP_BIN --allow-run \
+                "$script_dir/libexec/source-check.ts"
+        fi
         if ! have_program "$yt_dlp" || ! have_program "$FFMPEG_BIN"; then
             printf '%s\n' '{"status":"unavailable","code":"missing-command","message":"yt-dlp or managed FFmpeg is unavailable."}'
         elif ! have_program "$js_runtime"; then

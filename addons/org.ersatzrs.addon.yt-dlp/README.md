@@ -48,6 +48,43 @@ Direct video is streamed through ErsatzRS. SponsorBlock-enabled finite playback
 requires host interval-streaming integration or the separate prepared-file path;
 the add-on never silently returns an uncut stdout stream for that request.
 
+## Adaptive refresh
+
+Package 0.10.2 declares `media-list.source-check.v1`, enabling the existing
+**Adaptive** refresh choice after the candidate is installed and enabled.
+Adaptive is opt-in; fixed cadences and saved settings keep their behavior.
+
+Each check invokes native yt-dlp once with normalized JSON, flat extraction,
+downloads/configuration/self-update/default plugins disabled, no retries, and
+`--playlist-end 50`. The entire operation has a 12-second deadline; stdout and
+stderr each have a 1 MiB cap. The host retains its 15-second invocation deadline
+and process-group/Windows Job Object cleanup. Failed, incomplete, oversized or
+malformed extraction produces a sanitized failure code and existing backoff.
+
+The versioned validator binds the source URL to an ordered sample of up to 50
+entries and stable list metadata. It includes available extractor identity,
+item ID, title, description, publication/release timestamps, duration and
+availability; temporary media URLs and view/like statistics do not affect it.
+Single videos are one-entry samples. An explicit empty playlist is a valid
+observation. First observations, unknown validator versions and changed samples
+return `changed`; the same validator returns `unchanged` without importing.
+
+The probe uses no provider-specific URL parsing, feeds or endpoints. It does
+not broaden the separate import adapter's supported URL contract. Extractor
+output can omit metadata and need not be chronological. At most 16 distinct
+exact UTC timestamps are supplied; date-only, marked approximate and future
+values are omitted, and the probe does not enable approximate-date extractor
+options. Without usable timestamps the host keeps its existing daily cold-start
+behavior. Normalized timestamps carry no universal provenance flag, so an
+extractor's unmarked approximation cannot be distinguished from an exact value.
+
+**Unchanged means unchanged within the sampled window.** Older edits, deletions
+or additions beyond it require a full refresh/reconciliation. No periodic full
+scan is introduced. No `--break-on-existing` shortcut is used: provider ordering
+cannot prove that later entries contain nothing new. Some extractors fetch a
+whole provider page or collection before yt-dlp applies the 50-entry limit;
+the time and byte caps bound this cost, not a promised number of HTTP requests.
+
 ## Per-item options
 
 Hosts supporting manifest schema 5 render list defaults and item overrides for

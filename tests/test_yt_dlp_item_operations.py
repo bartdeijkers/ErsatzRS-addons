@@ -547,7 +547,12 @@ ffmpeg, ffprobe = sys.argv[2:4]
 plugin_directory = sys.argv[4]
 sys.dont_write_bytecode = True
 def command(args):
-    return subprocess.run(args, check=True, capture_output=True, text=True, timeout=60)
+    result = subprocess.run(args, capture_output=True, text=True, timeout=60)
+    if result.returncode:
+        raise AssertionError(
+            f"Command {args!r} exited with status {result.returncode}\n"
+            f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}")
+    return result
 with tempfile.TemporaryDirectory() as directory:
     root = pathlib.Path(directory)
     stage = root / "stage"

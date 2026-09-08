@@ -517,9 +517,19 @@ function v2ProviderWindow(
     return { examined: 1, complete: true, totalHint: 1 };
   }
 
-  const emittedPositions = entries.map((entry) =>
-    positiveInteger(entry.playlist_index)
-  );
+  // Flat extraction can omit per-item indices. yt-dlp keeps requested_entries
+  // aligned with emitted entries after archive filtering, and omits that array
+  // only when it represents the entire playlist in its original order.
+  const fullPlaylist = positions === undefined && offset === 0 &&
+    total !== undefined && total <= maxItems && entries.length === total;
+  const emittedPositions = entries.map((entry, index) => {
+    const position = entry.playlist_index !== undefined &&
+        entry.playlist_index !== null
+      ? positiveInteger(entry.playlist_index)
+      : positions?.[index] ?? (fullPlaylist ? index + 1 : undefined);
+    if (position !== undefined) entry.playlist_index = position;
+    return position;
+  });
   if (emittedPositions.some((position) => position === undefined)) {
     throw new Error("yt-dlp omitted a provider playlist position");
   }

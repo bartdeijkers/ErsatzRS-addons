@@ -2646,28 +2646,31 @@ archive = pathlib.Path(option("--download-archive"))
 known = set(archive.read_text(encoding="utf-8").splitlines()) if archive.exists() else set()
 requested = list(range(start, min(end, len(playlist["entries"])) + 1))
 emitted = []
+emitted_positions = []
 new_archive_lines = []
 for position in requested:
     entry = dict(playlist["entries"][position - 1])
     archive_line = "youtube " + entry["id"]
     if archive_line in known:
         continue
-    entry["playlist_index"] = position
     emitted.append(entry)
+    emitted_positions.append(position)
     known.add(archive_line)
     new_archive_lines.append(archive_line)
 archive.parent.mkdir(parents=True, exist_ok=True)
 with archive.open("a", encoding="utf-8") as output:
     for line in new_archive_lines:
         output.write(line + "\\n")
-print(json.dumps({
+result = {
     "id": "playlist-1",
     "title": "Fixture playlist",
     "description": "Overview description",
     "playlist_count": len(playlist["entries"]),
-    "requested_entries": [entry["playlist_index"] for entry in emitted],
     "entries": emitted,
-}))
+}
+if emitted_positions != list(range(1, len(playlist["entries"]) + 1)):
+    result["requested_entries"] = emitted_positions
+print(json.dumps(result))
 """,
                 encoding="utf-8",
             )

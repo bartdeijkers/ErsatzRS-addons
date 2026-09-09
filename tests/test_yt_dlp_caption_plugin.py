@@ -1,4 +1,5 @@
 import importlib.util
+import os
 import shutil
 import zipfile
 import pathlib
@@ -9,7 +10,7 @@ from unittest.mock import patch
 
 sys.dont_write_bytecode = True
 
-installed = shutil.which('yt-dlp')
+installed = os.environ.get('YT_DLP_TEST_ZIP') or shutil.which('yt-dlp')
 if not installed or not zipfile.is_zipfile(installed):
     raise RuntimeError('The stock Python-zip yt-dlp executable is required')
 sys.path.insert(0, installed)

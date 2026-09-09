@@ -19,6 +19,8 @@ jobs:
       - uses: denoland/setup-deno@v2
         with:
           deno-version: v2.x
+      - name: Install pinned media test dependencies
+        run: python tools/setup_ci_test_tools.py
       - name: Test native Windows entrypoints
         run: python -m unittest discover -s tests
 
@@ -27,9 +29,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
       - uses: denoland/setup-deno@v2
         with:
           deno-version: v2.x
+      - name: Install pinned media test dependencies
+        run: python tools/setup_ci_test_tools.py
       - name: Validate manifests and provider adapters
         run: |
           cd tools/validator

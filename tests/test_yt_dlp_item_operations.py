@@ -532,7 +532,7 @@ class ItemTransportTests(unittest.TestCase):
 
 class InstalledYtDlpMetadataTests(unittest.TestCase):
     def test_real_prepare_merges_converts_and_cuts_manual_subtitle_clock(self) -> None:
-        installed = shutil.which("yt-dlp")
+        installed = os.environ.get("YT_DLP_TEST_ZIP") or shutil.which("yt-dlp")
         ffmpeg = os.environ.get("FFMPEG_BIN") or shutil.which("ffmpeg")
         ffprobe = os.environ.get("FFPROBE_BIN") or shutil.which("ffprobe")
         self.assertTrue(installed and zipfile.is_zipfile(installed), "Python-zip yt-dlp is required")

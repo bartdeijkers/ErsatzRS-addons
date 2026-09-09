@@ -45,6 +45,13 @@ Install Deno before running the complete provider-adapter coverage. Some
 platform- or runtime-specific cases are skipped when their declared external
 runtime is unavailable.
 
+Caption postprocessor tests additionally require the stock platform-independent
+yt-dlp zipimport executable and FFmpeg/ffprobe 9. Set `YT_DLP_TEST_ZIP` to that
+download (not the Windows PyInstaller `.exe`) and `FFMPEG_BIN`/`FFPROBE_BIN` to
+the media executables when they are not on PATH. CI provisions checksum-pinned
+yt-dlp 2026.08.19 and ErsatzRS-ffmpeg 2.0.0 in runner temporary storage through
+`tools/setup_ci_test_tools.py`; it does not update installed tools.
+
 ## Verify native tool updates with synthetic executables
 
 These tests invoke only temporary fake executables and never update an
@@ -76,8 +83,9 @@ PowerShell required):
 powershell.exe -NoProfile -File tests/test_yt_dlp_source_check_windows.ps1
 ```
 
-For newer capabilities unsupported by the pinned standalone validator, use the
-current ErsatzRS checkout's `cargo xtask validate-addon-manifest <addon.toml>`.
+The pinned standalone validator supports the current manifest v6 contract.
+When developing a newer contract, use the corresponding ErsatzRS checkout's
+`cargo xtask validate-addon-manifest <addon.toml>` and refresh the pin before CI.
 The host's ignored `installed_yt_dlp_candidate_adaptive_unchanged_then_changed`
 test accepts `ERSATZRS_YT_DLP_CANDIDATE=<package-directory>` and installs a copy
 in a throwaway database. It checks the Adaptive capability predicate and real

@@ -148,10 +148,19 @@ if mode == "failure":
     def test_historical_exact_timestamp_and_host_request_byte_bound(self):
         result = self.invoke(payload={"id": "historic", "release_timestamp": -1})
         self.assertEqual(result["source_updated_at"], ["1969-12-31T23:59:59.000Z"])
-        # An encoded request may exceed 16 KiB while both fields fit host bounds.
-        source = "https://example.test/" + "a" * 8100
-        result = self.invoke('"' * 4096, source=source)
-        self.assertEqual(result["outcome"], "changed")
+        # Exercise encoded stdin size without exceeding the Windows .cmd fake's
+        # 8191-character command-line limit: only the source becomes tool argv.
+        # JSON Unicode/quote escaping expands these host-bounded fields past
+        # 16 KiB while the decoded source stays below the fake's command limit.
+        source = "https://example.test/" + "\u00e9" * 4000
+        validator = '"' * 4096
+        encoded = json.dumps({"source_url": source, "validator": validator}).encode("utf-8")
+        self.assertLessEqual(len(source.encode("utf-8")), 8192)
+        self.assertLessEqual(len(validator.encode("utf-8")), 4096)
+        self.assertGreater(len(encoded), 16 * 1024)
+        self.assertLessEqual(len(encoded), 64 * 1024)
+        result = self.invoke(validator, source=source)
+        self.assertEqual(result["outcome"], "changed", result)
 
     def test_unknown_invalid_and_foreign_validators_are_cold(self):
         for previous in ["junk", "", "yt-dlp-window-v2:" + "a" * 129,

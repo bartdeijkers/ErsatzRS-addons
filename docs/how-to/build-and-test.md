@@ -45,6 +45,21 @@ Install Deno before running the complete provider-adapter coverage. Some
 platform- or runtime-specific cases are skipped when their declared external
 runtime is unavailable.
 
+## Verify native tool updates with synthetic executables
+
+These tests invoke only temporary fake executables and never update an
+installed yt-dlp or access the network:
+
+```sh
+python3 -m unittest discover -s tests -p test_yt_dlp_tool_update.py
+```
+
+The native Windows counterpart requires Deno and Windows PowerShell:
+
+```powershell
+powershell.exe -NoProfile -File tests/test_yt_dlp_tool_update_windows.ps1
+```
+
 ## Verify adaptive source checks
 
 Run the normalized fixtures, POSIX or Windows entrypoint, bounded-output,

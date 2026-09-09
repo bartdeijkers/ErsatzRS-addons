@@ -4,6 +4,7 @@ setlocal DisableDelayedExpansion
 set "OPERATION=%~1"
 set "YT_DLP_BIN=%ERSATZRS_ADDON_SETTING_YT_DLP_BIN%"
 if not defined YT_DLP_BIN set "YT_DLP_BIN=yt-dlp.exe"
+if /i "%OPERATION%"=="update" goto :tool_update
 set "YT_DLP_CACHE_DIR=%ERSATZRS_ADDON_CACHE_DIR%"
 if not defined YT_DLP_CACHE_DIR if defined TEMP set "YT_DLP_CACHE_DIR=%TEMP%\ersatzrs-yt-dlp-cache"
 if not defined YT_DLP_CACHE_DIR if defined TMP set "YT_DLP_CACHE_DIR=%TMP%\ersatzrs-yt-dlp-cache"
@@ -24,6 +25,10 @@ if /i "%OPERATION%"=="item" goto :item
 if /i "%OPERATION%"=="play" goto :play
 call :fail operation-failed "Unsupported add-on operation." 64
 exit /b 64
+
+:tool_update
+deno.exe run --quiet --allow-env=YT_DLP_BIN --allow-run "%~dp0libexec\tool-update.ts"
+exit /b %ERRORLEVEL%
 
 :check
 if "%ERSATZRS_ADDON_CAPABILITY%"=="media-list.source-check.v1" goto :source_check

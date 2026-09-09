@@ -48,6 +48,34 @@ Direct video is streamed through ErsatzRS. SponsorBlock-enabled finite playback
 requires host interval-streaming integration or the separate prepared-file path;
 the add-on never silently returns an uncut stdout stream for that request.
 
+
+## Native yt-dlp updates
+
+Package 0.11.0 declares manifest v6, `tool.update.v1`, and the
+`permissions.tool_update = ["YT_DLP_BIN"]` grant. The host may invoke the
+`update` operation with `{"schema":"tool.update.v1","tool_key":"YT_DLP_BIN"}`.
+This changes the operator-configured executable, independently of add-on package
+updates. Ordinary media operations continue to pass `--no-update`.
+
+The operation probes the configured executable with
+`--no-config --no-plugin-dirs --no-update --version`, invokes
+`--no-config --no-plugin-dirs -U`, and probes the version again. The native
+yt-dlp updater owns downloading and replacing its executable. This package
+does not download installers, invoke package managers, choose a release channel,
+or implement backups or rollback.
+
+The single JSON result carries before/after versions, one of `updated`,
+`already_current`, `manual_update_required`, or `failed`, and an optional
+bounded diagnostic code. Known native unsupported-installation and write-access
+diagnostics require a manual update. Unknown failures remain failed. Raw native
+output and executable paths are not returned.
+
+Version probes have 10-second deadlines and 4 KiB stdout/stderr caps. The native
+update has a 60-second deadline and 16 KiB caps. Request input is limited to
+1 KiB; results fit the 2 KiB host contract. The host owns admission and process
+tree cancellation. A changed version reports the native update result only;
+it is not a separate post-update media-validation or rollback guarantee.
+
 ## Adaptive refresh
 
 Package 0.10.2 declares `media-list.source-check.v1`, enabling the existing
@@ -149,7 +177,8 @@ content, preparation fails instead of admitting the unchanged original.
 
 Both platform entrypoints use the same Deno adapters. The host supplies managed
 FFmpeg and ffprobe, and limits the child process tree and staging usage during
-preparation. Automatic yt-dlp updates remain disabled.
+preparation. These media operations retain `--no-update`; only the separately
+permission-reviewed maintenance operation may invoke `yt-dlp -U`.
 
 `media-list.subtitles.v1` adds a separate `subtitles` operation that acquires
 only explicitly requested manual subtitle tracks with `--skip-download`,

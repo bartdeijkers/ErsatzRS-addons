@@ -1763,7 +1763,9 @@ exit 0
                 / "addon.toml"
             ).read_text(encoding="utf-8")
         )
-        self.assertEqual(manifest["manifest_version"], 5)
+        self.assertEqual(manifest["manifest_version"], 6)
+        self.assertEqual(manifest["permissions"]["tool_update"], ["YT_DLP_BIN"])
+        self.assertIn("tool.update.v1", [entry["id"] for entry in manifest["capabilities"]])
         self.assertTrue(
             {
                 "media-list.list.v1",

@@ -100,6 +100,11 @@ run_media_list_import() {
 }
 
 case "$operation" in
+    update)
+        YT_DLP_BIN=$yt_dlp export YT_DLP_BIN
+        exec deno run --quiet --allow-env=YT_DLP_BIN --allow-run \
+            "$script_dir/libexec/tool-update.ts"
+        ;;
     check)
         if [ "${ERSATZRS_ADDON_CAPABILITY:-}" = "media-list.source-check.v1" ]; then
             YT_DLP_BIN=$yt_dlp export YT_DLP_BIN

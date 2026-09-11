@@ -6,6 +6,8 @@ All notable changes are recorded here using Keep a Changelog.
 
 ### Fixed
 
+- Report Firefox cookie-database permission denials as a locked browser profile
+  during yt-dlp access checks, while keeping unrelated permission failures generic.
 - Supply checksum-pinned yt-dlp and FFmpeg fixtures for clean Windows/Linux CI
   runners, and keep the large source-check request test within Windows batch
   command-line limits while retaining its greater-than-16-KiB stdin assertion.

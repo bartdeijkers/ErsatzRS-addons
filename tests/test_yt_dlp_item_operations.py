@@ -91,6 +91,12 @@ elif mode == "success":
     print("fixture")
 else:
     messages = {"profile": "could not find cookies database", "locked": "database is locked", "decrypt": "failed to decrypt DPAPI", "restricted": "Sign in to confirm your age", "retry": "HTTP Error 429 retry-after: 99999", "failure": "unclassified failure"}
+    messages.update({
+        "firefox-permission": "PermissionError: [Errno 13] Permission denied: 'synthetic-profile/cookies.sqlite'",
+        "firefox-denied": "Permission denied: 'synthetic-profile/cookies.sqlite'",
+        "cache-permission": "PermissionError: [Errno 13] Permission denied: 'synthetic-cache/entry.json'",
+        "unrelated-permission": "cookies.sqlite loaded\\nPermissionError: [Errno 13] Permission denied: 'synthetic-output/item.json'",
+    })
     sys.stderr.write(messages[mode] + " SYNTHETIC_PRIVATE_DIAGNOSTIC")
     sys.exit(1)
 ''',
@@ -336,6 +342,8 @@ else:
                 else:
                     self.assertEqual(args[args.index("--cookies-from-browser") + 1], browser)
         for mode, expected in (("profile", "profile_unavailable"), ("locked", "profile_locked"),
+                               ("firefox-permission", "profile_locked"), ("firefox-denied", "profile_locked"),
+                               ("cache-permission", "failed"), ("unrelated-permission", "failed"),
                                ("decrypt", "decryption_failed"), ("restricted", "provider_restricted"),
                                ("failure", "failed"), ("retry", "failed")):
             with self.subTest(mode=mode):

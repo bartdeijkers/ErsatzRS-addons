@@ -76,7 +76,8 @@ function accessOutcome(stderr: string): string {
   if (/could not find.*(?:cookies|profile)|(?:cookies|profile).*(?:not found|does not exist)|no such file/i.test(stderr)) {
     return "profile_unavailable";
   }
-  if (/database is locked|could not copy.*cookie|(?:cookie|profile).*(?:locked|being used)/i.test(stderr)) {
+  if (/database is locked|could not copy.*cookie|(?:cookie|profile).*(?:locked|being used)/i.test(stderr)
+    || /(?:PermissionError|permission denied)[^\r\n]*\bcookies\.sqlite(?:['"\s]|$)/i.test(stderr)) {
     return "profile_locked";
   }
   if (/decrypt|keyring|keychain|DPAPI/i.test(stderr)) return "decryption_failed";

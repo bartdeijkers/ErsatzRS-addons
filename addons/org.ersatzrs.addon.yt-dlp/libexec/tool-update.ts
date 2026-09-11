@@ -1,4 +1,5 @@
 import { boundedCommand } from "./item-options.ts";
+import { latestRelease, persistHealth, toolVersion as version } from "./tool-health.ts";
 
 type Outcome = "updated" | "already_current" | "manual_update_required" | "failed";
 type Diagnostic = "unsupported_installation" | "update_failed" | "version_probe_failed" | "tool_unavailable";
@@ -14,11 +15,6 @@ export type ToolUpdateResult = {
 
 const baseArguments = ["--no-config", "--no-plugin-dirs"];
 const versionArguments = [...baseArguments, "--no-update", "--version"];
-
-function version(output: string): string | null {
-  const value = output.trim();
-  return value.length <= 128 && /^\d{4}\.\d{2}\.\d{2}(?:\.\d+)*$/.test(value) ? value : null;
-}
 
 function requiresManualUpdate(stderr: string): boolean {
   // These are narrow native updater diagnostics, not arbitrary mentions of
@@ -37,6 +33,27 @@ export async function updateTool(
   request: unknown,
   executable: string,
   run: CommandRunner = boundedCommand,
+  directory?: string,
+): Promise<ToolUpdateResult> {
+  await persistHealth(directory, executable, null, null);
+  let output = "";
+  const observe: CommandRunner = async (command, args, timeout, limit) => {
+    const result = await run(command, args, timeout, limit);
+    if (args.includes("-U")) output = result.stdout;
+    return result;
+  };
+  const result = await nativeUpdate(request, executable, observe);
+  const latest = (result.outcome === "failed" || result.outcome === "manual_update_required") &&
+      result.before_version && result.after_version === result.before_version
+    ? latestRelease(output, result.before_version) : null;
+  await persistHealth(directory, executable, latest ? result.after_version : null, latest);
+  return result;
+}
+
+async function nativeUpdate(
+  request: unknown,
+  executable: string,
+  run: CommandRunner,
 ): Promise<ToolUpdateResult> {
   const result: ToolUpdateResult = {
     schema: "tool.update.v1", tool_key: "YT_DLP_BIN",
@@ -95,6 +112,6 @@ if (import.meta.main) {
     for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
     request = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
   } catch { /* Invalid requests fail without invoking the configured tool. */ }
-  const result = await updateTool(request, Deno.env.get("YT_DLP_BIN") ?? "");
+  const result = await updateTool(request, Deno.env.get("YT_DLP_BIN") ?? "", boundedCommand, Deno.env.get("ERSATZRS_ADDON_DATA_DIR"));
   console.log(JSON.stringify(result));
 }

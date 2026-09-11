@@ -27,6 +27,17 @@ fail() {
     exit "$status"
 }
 
+tool_health_operation() {
+    YT_DLP_BIN=$yt_dlp export YT_DLP_BIN
+    if [ -n "${ERSATZRS_ADDON_DATA_DIR:-}" ]; then
+        exec deno run --quiet --allow-env=YT_DLP_BIN,ERSATZRS_ADDON_DATA_DIR,ERSATZRS_ADDON_CHECK_CONTEXT_VERSION --allow-run \
+            "--allow-read=$ERSATZRS_ADDON_DATA_DIR" "--allow-write=$ERSATZRS_ADDON_DATA_DIR" \
+            "$script_dir/libexec/$1.ts"
+    fi
+    exec deno run --quiet --allow-env=YT_DLP_BIN,ERSATZRS_ADDON_DATA_DIR,ERSATZRS_ADDON_CHECK_CONTEXT_VERSION --allow-run \
+        "$script_dir/libexec/$1.ts"
+}
+
 enumerate_playlist() {
     output_template=$1
     playlist_url=$2
@@ -101,9 +112,7 @@ run_media_list_import() {
 
 case "$operation" in
     update)
-        YT_DLP_BIN=$yt_dlp export YT_DLP_BIN
-        exec deno run --quiet --allow-env=YT_DLP_BIN --allow-run \
-            "$script_dir/libexec/tool-update.ts"
+        tool_health_operation tool-update
         ;;
     check)
         if [ "${ERSATZRS_ADDON_CAPABILITY:-}" = "media-list.source-check.v1" ]; then
@@ -120,7 +129,7 @@ case "$operation" in
             # when it fetches that URL, so playback cannot succeed.
             printf '%s\n' '{"status":"unavailable","code":"missing-js-runtime","message":"A JavaScript runtime is required for playback and was not found."}'
         else
-            printf '%s\n' '{"status":"ready","code":"ready","message":"yt-dlp Remote Streams is ready."}'
+            tool_health_operation tool-health
         fi
         ;;
     runtime-info | test-access | interval-metadata | play-intervals | prepare | subtitles)

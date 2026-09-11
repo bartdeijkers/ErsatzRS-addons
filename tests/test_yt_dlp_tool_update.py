@@ -35,6 +35,8 @@ if "--version" in args:
     else:
         print("2026.09.08" if state.exists() else "2026.09.01")
 elif "-U" in args:
+    if os.environ.get("FAKE_RELEASE_OUTPUT"):
+        print(os.environ["FAKE_RELEASE_OUTPUT"])
     if mode == "timeout":
         time.sleep(60)
     if mode == "manual":
@@ -72,6 +74,122 @@ else:
                         FAKE_CALLS=str(self.calls), FAKE_STATE=str(self.root / "state"),
                         ERSATZRS_ADDON_SETTING_YT_DLP_BIN=str(fake), YT_DLP_BIN=str(fake))
         self.fake = fake
+
+    def release_output(self, channel="stable", current="2026.09.01", latest="2026.09.08"):
+        origin = {"stable": "yt-dlp/yt-dlp", "nightly": "yt-dlp/yt-dlp-nightly-builds", "master": "yt-dlp/yt-dlp-master-builds"}[channel]
+        return f"Current version: {channel}@{current} from {origin}\nLatest version: {channel}@{latest} from {origin}"
+
+    def enable_health(self):
+        data = self.root / "provider data"
+        data.mkdir()
+        self.env["ERSATZRS_ADDON_DATA_DIR"] = str(data)
+        self.env["FAKE_RELEASE_OUTPUT"] = self.release_output()
+        self.env["FFMPEG_BIN"] = str(self.fake)
+        return data / "tool-update-health.json"
+
+    def readiness(self):
+        completed = subprocess.run(self.command[:-1] + ["check"], text=True, capture_output=True,
+                                   env=self.env, timeout=15)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(completed.stderr, "")
+        return json.loads(completed.stdout)
+
+    def test_failed_confirmed_stale_warns_without_network_on_readiness(self):
+        state = self.enable_health()
+        for channel in ("stable", "nightly", "master"):
+            self.env["FAKE_RELEASE_OUTPUT"] = self.release_output(channel)
+            self.assertEqual(self.invoke("manual")["outcome"], "manual_update_required")
+            self.assertEqual(self.readiness()["code"], "tool-update-failed-stale")
+            payload = state.read_text()
+            self.assertLess(len(payload), 1024)
+            self.assertNotIn(str(self.fake), payload)
+            self.assertNotIn("SYNTHETIC_PRIVATE", payload)
+        calls = [json.loads(line) for line in self.calls.read_text().splitlines()]
+        self.assertEqual(sum("-U" in args for args in calls), 3)
+
+    def test_unknown_conflicting_cross_channel_and_nonstale_evidence_clears_warning(self):
+        self.enable_health()
+        invalid = ["", "Latest version: unknown", self.release_output() + "\n" + self.release_output(),
+                   self.release_output().replace("Latest version: stable", "Latest version: nightly"),
+                   self.release_output(latest="2026.09.01"), self.release_output(latest="2026.08.01"),
+                   self.release_output(current="2026.09.02"), self.release_output().replace("Latest version:", "Requested version:")]
+        for output in invalid:
+            with self.subTest(output=output):
+                self.env["FAKE_RELEASE_OUTPUT"] = self.release_output()
+                self.invoke("network")
+                self.assertEqual(self.readiness()["status"], "warning")
+                self.env["FAKE_RELEASE_OUTPUT"] = output
+                self.invoke("network")
+                self.assertEqual(self.readiness()["status"], "ready")
+
+    def test_success_manual_repair_and_next_attempt_clear_warning(self):
+        self.enable_health()
+        self.invoke("manual")
+        self.assertEqual(self.readiness()["status"], "warning")
+        self.invoke("noop")
+        self.assertEqual(self.readiness()["status"], "ready")
+        self.invoke("manual")
+        Path(self.env["FAKE_STATE"]).write_text("manually repaired")
+        self.assertEqual(self.readiness()["status"], "ready")
+        Path(self.env["FAKE_STATE"]).unlink()
+        self.assertEqual(self.readiness()["status"], "ready")
+
+    def test_missing_directory_identity_malformed_and_oversized_state(self):
+        state = self.enable_health()
+        self.invoke("manual")
+        valid = json.loads(state.read_text())
+        for content in ("invalid", "x" * 1025, json.dumps(dict(valid, identity="0" * 64))):
+            state.write_text(content)
+            self.assertEqual(self.readiness()["status"], "ready")
+        self.env["ERSATZRS_ADDON_DATA_DIR"] = str(self.root / "missing" / "nested provider data")
+        self.assertEqual(self.invoke("manual")["outcome"], "manual_update_required")
+        self.assertEqual(self.readiness()["status"], "warning")
+
+    def test_missing_command_precedes_update_warning(self):
+        self.enable_health()
+        self.invoke("manual")
+        self.env["FFMPEG_BIN"] = str(self.root / "missing-ffmpeg")
+        self.assertEqual(self.readiness()["code"], "missing-command")
+
+    def test_failed_atomic_write_invalidates_previous_warning(self):
+        state = self.enable_health()
+        self.invoke("manual")
+        self.assertEqual(self.readiness()["status"], "warning")
+        temporary = Path(str(state) + ".tmp")
+        temporary.mkdir()
+        (temporary / "synthetic blocker").write_text("fixture")
+        self.env["FAKE_RELEASE_OUTPUT"] = ""
+        self.assertEqual(self.invoke("noop")["outcome"], "already_current")
+        self.assertFalse(state.exists())
+        self.assertEqual(self.readiness()["status"], "ready")
+
+    def test_valid_warning_requires_only_read_permission(self):
+        state = self.enable_health()
+        self.invoke("manual")
+        completed = subprocess.run(
+            ["deno", "run", "--quiet", "--no-prompt", "--allow-env=YT_DLP_BIN,ERSATZRS_ADDON_DATA_DIR,ERSATZRS_ADDON_CHECK_CONTEXT_VERSION",
+             "--allow-run", "--allow-read=" + str(state.parent), str(ADDON / "libexec/tool-health.ts")],
+            text=True, capture_output=True, env=self.env, timeout=15)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(completed.stderr, "")
+        self.assertEqual(json.loads(completed.stdout)["code"], "tool-update-failed-stale")
+
+    def test_warning_context_requires_host_advertisement(self):
+        self.enable_health()
+        self.env.pop("ERSATZRS_ADDON_CHECK_CONTEXT_VERSION", None)
+        self.invoke("manual")
+        legacy = self.readiness()
+        self.assertEqual(set(legacy), {"status", "code", "message"})
+        for text in ("yt-dlp", "2026.09.01", "2026.09.08"):
+            self.assertIn(text, legacy["message"])
+        self.env["ERSATZRS_ADDON_CHECK_CONTEXT_VERSION"] = "1"
+        self.assertEqual(self.readiness()["tool_update"], {
+            "program": "yt-dlp", "installed_version": "2026.09.01", "latest_version": "2026.09.08"})
+        self.env["ERSATZRS_ADDON_CHECK_CONTEXT_VERSION"] = "2"
+        self.assertNotIn("tool_update", self.readiness())
+        self.env["ERSATZRS_ADDON_CHECK_CONTEXT_VERSION"] = "1"
+        self.invoke("noop")
+        self.assertEqual(set(self.readiness()), {"status", "code", "message"})
 
     def invoke(self, mode="updated", request=REQUEST, command=None):
         completed = subprocess.run(command or self.command, input=json.dumps(request), text=True,

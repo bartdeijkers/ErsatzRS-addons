@@ -27,7 +27,16 @@ call :fail operation-failed "Unsupported add-on operation." 64
 exit /b 64
 
 :tool_update
-deno.exe run --quiet --allow-env=YT_DLP_BIN --allow-run "%~dp0libexec\tool-update.ts"
+set "TOOL_HEALTH_SCRIPT=tool-update"
+goto :tool_health_operation
+
+:tool_health_operation
+if defined ERSATZRS_ADDON_DATA_DIR goto :tool_health_persisted
+deno.exe run --quiet --allow-env=YT_DLP_BIN,ERSATZRS_ADDON_DATA_DIR,ERSATZRS_ADDON_CHECK_CONTEXT_VERSION --allow-run "%~dp0libexec\%TOOL_HEALTH_SCRIPT%.ts"
+exit /b %ERRORLEVEL%
+
+:tool_health_persisted
+deno.exe run --quiet --allow-env=YT_DLP_BIN,ERSATZRS_ADDON_DATA_DIR,ERSATZRS_ADDON_CHECK_CONTEXT_VERSION --allow-run "--allow-read=%ERSATZRS_ADDON_DATA_DIR%" "--allow-write=%ERSATZRS_ADDON_DATA_DIR%" "%~dp0libexec\%TOOL_HEALTH_SCRIPT%.ts"
 exit /b %ERRORLEVEL%
 
 :check
@@ -40,8 +49,8 @@ call :require_program "powershell.exe"
 if errorlevel 1 goto :missing
 call :require_program "deno.exe"
 if errorlevel 1 goto :missing_js_runtime
-echo {"status":"ready","code":"ready","message":"yt-dlp Remote Streams is ready."}
-exit /b 0
+set "TOOL_HEALTH_SCRIPT=tool-health"
+goto :tool_health_operation
 
 :source_check
 deno.exe run --quiet --allow-env=YT_DLP_BIN --allow-run "%~dp0libexec\source-check.ts"

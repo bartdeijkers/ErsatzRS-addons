@@ -25,6 +25,8 @@ public class ToolUpdateFixture {
             return 0;
         }
         if (Array.IndexOf(args, "-U") < 0) return 90;
+        string release = Environment.GetEnvironmentVariable("UPDATE_RELEASE");
+        if (!String.IsNullOrEmpty(release)) Console.WriteLine(release);
         if (mode == "timeout") System.Threading.Thread.Sleep(60000);
         if (mode == "manual") {
             Console.Error.WriteLine("ERROR: You installed yt-dlp from a manual build or with a package manager; Use that to update");
@@ -114,7 +116,35 @@ console.log(JSON.stringify(await updateTool({schema:"tool.update.v1",tool_key:"Y
     if ($result.outcome -ne 'failed' -or $result.diagnostic_code -ne 'update_failed' -or $watch.Elapsed.TotalSeconds -gt 15) {
         throw 'native deadline mismatch'
     }
-    Write-Output 'PASS: synthetic Windows native update outcomes, arguments, privacy, and deadline.'
+    $env:ERSATZRS_ADDON_DATA_DIR = Join-Path $stage 'missing\provider data'
+    $env:FFMPEG_BIN = $fake
+    $env:UPDATE_RELEASE = "Current version: stable@2026.09.01 from yt-dlp/yt-dlp`nLatest version: stable@2026.09.08 from yt-dlp/yt-dlp"
+    $result = Invoke-Update 'manual'
+    $health = (& $entrypoint check) | ConvertFrom-Json
+    if ($health.status -ne 'warning' -or $health.code -ne 'tool-update-failed-stale') { throw 'missing stale update warning' }
+    if ($health.PSObject.Properties.Name -contains 'tool_update') { throw 'legacy host received extended context' }
+    $env:ERSATZRS_ADDON_CHECK_CONTEXT_VERSION = '1'
+    $health = (& $entrypoint check) | ConvertFrom-Json
+    if ($health.tool_update.program -ne 'yt-dlp' -or $health.tool_update.installed_version -ne '2026.09.01' -or $health.tool_update.latest_version -ne '2026.09.08') { throw 'missing advertised update context' }
+    $healthPath = Join-Path $env:ERSATZRS_ADDON_DATA_DIR 'tool-update-health.json'
+    $saved = [IO.File]::ReadAllText($healthPath)
+    if ($saved.Length -gt 1024 -or $saved.Contains($fake) -or $saved.Contains('SYNTHETIC_PRIVATE')) { throw 'unsafe saved health' }
+    $calls = [IO.File]::ReadAllLines($env:UPDATE_CALLS)
+    if ($calls.Count -ne 5 -or $calls[3] -ne $probe -or $calls[4] -ne $probe) { throw 'readiness must only observe local version' }
+    $result = Invoke-Update 'noop'
+    $health = (& $entrypoint check) | ConvertFrom-Json
+    if ($health.status -ne 'ready') { throw 'success did not clear warning' }
+    if ($health.PSObject.Properties.Name -contains 'tool_update') { throw 'ready health retained update context' }
+    $result = Invoke-Update 'manual'
+    [IO.File]::WriteAllText($env:UPDATE_STATE, 'manual repair')
+    $health = (& $entrypoint check) | ConvertFrom-Json
+    if ($health.status -ne 'ready') { throw 'manual repair did not clear warning' }
+    $result = Invoke-Update 'manual'
+    $env:UPDATE_RELEASE = ''
+    $result = Invoke-Update 'network'
+    $health = (& $entrypoint check) | ConvertFrom-Json
+    if ($health.status -ne 'ready') { throw 'unknown latest did not clear warning' }
+    Write-Output 'PASS: synthetic Windows native update outcomes, arguments, privacy, deadline, and stale health clearance.'
 } finally {
     Get-Process -Name fixture -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $fake } | Stop-Process -Force
     Remove-Item -LiteralPath $stage -Recurse -Force

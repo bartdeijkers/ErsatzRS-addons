@@ -10,12 +10,14 @@ remains an immutable host-managed copy until an operator confirms an update.
 
 ## Add-ons
 
-- [Beeld & Geluid](addons/org.ersatzrs.addon.beeldengeluid/README.md) enumerates
-  Schatkamer series, episodes, public shared lists, and saved searches, and
-  streams their programmes.
 - [yt-dlp](addons/org.ersatzrs.addon.yt-dlp/README.md) streams supported remote
   media through an operator-installed yt-dlp and imports public playlists or
   individual videos as add-on lists.
+
+Beeld & Geluid is retired and unsupported by maintainer decision. Do not
+access that service for development or acceptance. Current bundles contain
+only yt-dlp; existing operator-managed installations and data are not
+automatically removed.
 
 ## Documentation
 

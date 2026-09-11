@@ -8,9 +8,6 @@ index URL, signing key, detached signature, or GitHub Pages deployment.
 ```text
 repository.toml
 addons/
-├── org.ersatzrs.addon.beeldengeluid/
-│   ├── addon.toml
-│   └── ...package files...
 └── org.ersatzrs.addon.yt-dlp/
     ├── addon.toml
     └── ...package files...

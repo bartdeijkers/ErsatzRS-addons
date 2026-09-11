@@ -4,6 +4,12 @@ All notable changes are recorded here using Keep a Changelog.
 
 ## [Unreleased]
 
+### Removed
+
+- Retire official Beeld & Geluid support and its active usage documentation.
+  The current package tree already contains only yt-dlp; no runtime package,
+  operator installation or saved media is deleted by this documentation change.
+
 ### Fixed
 
 - Report Firefox cookie-database permission denials as a locked browser profile

@@ -1002,14 +1002,16 @@ exit 0
         self.assertEqual(rejected.returncode, 64)
         self.assertIn("fragment end must be after fragment start", rejected.stderr)
 
-    @unittest.skipUnless(pathlib.Path("/bin/sh").exists(), "POSIX shell required")
+    @unittest.skipUnless(
+        pathlib.Path("/bin/sh").exists() and shutil.which("deno"),
+        "POSIX shell and Deno required",
+    )
     def test_posix_readiness_contracts_emit_one_json_object(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
-            # yt-dlp resolves its JavaScript runtime from PATH, so a ready
-            # result depends on one being discoverable.
+            # Readiness executes the health helper through Deno; an exit-only
+            # fake runtime cannot prove that the helper emits its JSON contract.
             runtime = pathlib.Path(temporary) / "deno"
-            runtime.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-            runtime.chmod(0o755)
+            runtime.symlink_to(pathlib.Path(shutil.which("deno")).resolve())
             for addon_id, extra in [
                 ("org.ersatzrs.addon.yt-dlp", {"ERSATZRS_ADDON_SETTING_YT_DLP_BIN": "/bin/true"}),
             ]:

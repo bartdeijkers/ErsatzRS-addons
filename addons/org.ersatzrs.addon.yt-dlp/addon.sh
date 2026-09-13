@@ -106,7 +106,7 @@ run_media_list_import() {
         return 0
     else
         status=$?
-        fail provider-unreachable "The video provider request failed." "$status"
+        fail operation-failed "The media-list import failed." "$status"
     fi
 }
 

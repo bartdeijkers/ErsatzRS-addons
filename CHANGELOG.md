@@ -12,6 +12,10 @@ All notable changes are recorded here using Keep a Changelog.
 
 ### Fixed
 
+- yt-dlp 0.11.1 keeps addressable playlist entries with missing titles using a fallback
+  display title, preserving their order and unknown availability instead of
+  aborting the entire import. Import failures no longer falsely report that the
+  provider is unreachable when mapping fails.
 - Report Firefox cookie-database permission denials as a locked browser profile
   during yt-dlp access checks, while keeping unrelated permission failures generic.
 - Supply checksum-pinned yt-dlp and FFmpeg fixtures for clean Windows/Linux CI

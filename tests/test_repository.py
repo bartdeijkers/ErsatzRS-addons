@@ -2735,6 +2735,7 @@ print(json.dumps(result))
                 max_items: int = 250,
                 cursor: str | None = None,
                 header: dict[str, object] | None = None,
+                expected_error: str | None = None,
             ) -> list[dict]:
                 playlist.write_text(
                     json.dumps(
@@ -2778,6 +2779,10 @@ print(json.dumps(result))
                     text=True,
                     env=environment,
                 )
+                if expected_error is not None:
+                    self.assertEqual(self.final_operation_error(result)["code"], expected_error)
+                    self.assertEqual(result.stdout, "")
+                    return []
                 self.assertEqual(result.returncode, 0, result.stderr)
                 shutil.copyfile(staged_archive, live_archive)
                 return [json.loads(line) for line in result.stdout.splitlines()]
@@ -2950,6 +2955,45 @@ print(json.dumps(result))
                 live_archive.read_text(encoding="utf-8").splitlines(),
                 ["youtube a", "youtube b", "youtube c", "youtube d"],
             )
+
+            # An untitled but addressable row must not discard the other items
+            # or be counted as skipped before the host receives it.
+            live_archive.unlink()
+            entries = [
+                item("named"),
+                {**item("untitled"), "title": None, "availability": None},
+                {**item("blank"), "title": "  ", "availability": None},
+            ]
+            untitled = refresh(entries, "full")
+            self.assertEqual(
+                (untitled[0]["examined_count"], untitled[0]["archived_skipped_count"], untitled[0]["emitted_count"]),
+                (3, 0, 3),
+            )
+            self.assertEqual([row["rank"] for row in untitled[2:]], [0, 1, 2])
+            self.assertEqual(untitled[2]["title"], "Video named")
+            for row, identity in zip(untitled[3:], ["untitled", "blank"]):
+                self.assertEqual(row["provider_id"], identity)
+                self.assertEqual(row["title"], f"Untitled video ({identity})")
+                self.assertEqual(row["display_title"], row["title"])
+                self.assertEqual(row["source_url"], entries[row["rank"]]["webpage_url"])
+                self.assertEqual(row["availability"], "unknown")
+                self.assertNotIn("availability_reason", row)
+            repeated = refresh(entries, "incremental")
+            self.assertEqual(
+                (repeated[0]["examined_count"], repeated[0]["archived_skipped_count"], repeated[0]["emitted_count"]),
+                (3, 3, 0),
+            )
+            self.assertEqual([row["record_type"] for row in repeated], ["page", "list"])
+
+            # A genuinely unmappable row is still refused, but not falsely
+            # reported as a network outage or committed to the live archive.
+            before = live_archive.read_bytes()
+            refresh(
+                [{**item("invalid"), "webpage_url": None}],
+                "full",
+                expected_error="operation-failed",
+            )
+            self.assertEqual(live_archive.read_bytes(), before)
 
         manifest = tomllib.loads(
             (addon_root / "addon.toml").read_text(encoding="utf-8")

@@ -62,7 +62,7 @@ if errorlevel 1 goto :missing
 call :require_program "deno.exe"
 if errorlevel 1 goto :missing_js_runtime
 deno.exe run --quiet --allow-env=YT_DLP_BIN,YT_DLP_CACHE_DIR --allow-run "%~dp0libexec\media-list-import.ts" "%OPERATION%"
-if errorlevel 1 goto :provider_failed
+if errorlevel 1 goto :import_failed
 exit /b 0
 
 :item_operation
@@ -112,6 +112,10 @@ if not defined ERSATZRS_REMOTE_STREAM_SEEK set "ERSATZRS_REMOTE_STREAM_SEEK=0"
 deno.exe run --quiet --allow-env --allow-run "%~dp0libexec\fragment-playback.ts"
 if errorlevel 1 goto :provider_failed
 exit /b 0
+
+:import_failed
+call :fail operation-failed "The media-list import failed." 70
+exit /b 70
 
 :provider_failed
 call :fail provider-unreachable "The video provider request failed." 69

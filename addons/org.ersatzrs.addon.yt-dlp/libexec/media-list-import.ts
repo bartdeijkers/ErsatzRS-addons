@@ -279,11 +279,12 @@ function providerItem(
   collection?: string,
 ): JsonObject | undefined {
   const id = text(entry.id);
-  const title = text(entry.title);
   const sourceUrl = safeHttpsUrl(entry.webpage_url) ??
     safeHttpsUrl(entry.original_url) ??
     safeHttpsUrl(entry.url);
-  if (!id || !title || !sourceUrl) return undefined;
+  if (!id || !sourceUrl) return undefined;
+  // Flat discovery can omit a title without establishing unavailability.
+  const title = text(entry.title) ?? `Untitled video (${id})`;
   const state = availability(entry.availability);
   const reasonCode = availabilityReasonCode(entry.availability);
   const duration = Number(entry.duration);

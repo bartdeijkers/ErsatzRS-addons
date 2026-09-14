@@ -287,7 +287,11 @@ function providerItem(
   const title = text(entry.title) ?? `Untitled video (${id})`;
   const state = availability(entry.availability);
   const reasonCode = availabilityReasonCode(entry.availability);
-  const duration = Number(entry.duration);
+  const rawDuration = entry.duration;
+  const duration = (typeof rawDuration !== "number" && typeof rawDuration !== "string") ||
+      (typeof rawDuration === "string" && rawDuration.trim() === "")
+    ? undefined
+    : Number(rawDuration);
   const row: JsonObject = {
     record_type: "item",
     provider_id: id,
@@ -304,7 +308,7 @@ function providerItem(
     availability_reason: state === "unavailable" ? "not_playable" : undefined,
     availability_reason_code: reasonCode,
     content_kind: contentKind(entry),
-    duration_seconds: Number.isFinite(duration) && duration >= 0
+    duration_seconds: duration !== undefined && Number.isFinite(duration) && duration >= 0
       ? Math.round(duration)
       : undefined,
     liveness: liveness(entry),

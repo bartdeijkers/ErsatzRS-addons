@@ -2459,6 +2459,43 @@ printf '%s\n' '{"title":"Fixture playlist","description":"Fixture list descripti
             self.assertIn("discover", source)
             self.assertIn("enrich", source)
 
+    @unittest.skipUnless(shutil.which("deno") or shutil.which("deno.exe"), "deno required")
+    def test_yt_dlp_discovery_preserves_unknown_duration_and_numeric_zero(self) -> None:
+        addon_root = ROOT / "addons" / "org.ersatzrs.addon.yt-dlp"
+        with tempfile.TemporaryDirectory() as temporary:
+            fixtures = pathlib.Path(temporary)
+            entries = []
+            for index, duration in enumerate([None, "", "  ", 0, "0", 12.6, "invalid", False]):
+                entries.append({"id": str(index), "title": f"Fixture {index}",
+                                "webpage_url": f"https://example.test/video/{index}", "duration": duration})
+            entries.append({"id": "missing", "title": "Missing duration", "webpage_url": "https://example.test/video/missing"})
+            playlist = fixtures / "playlist.json"
+            playlist.write_text(json.dumps({"id": "fixture", "title": "Duration fixture", "entries": entries}), encoding="utf-8")
+            if os.name == "nt":
+                fake = fixtures / "provider.cmd"
+                fake.write_text('@echo off\ntype "%FAKE_FIXTURE%"\n', encoding="utf-8")
+                command = [os.environ.get("COMSPEC", "cmd.exe"), "/d", "/c", str(addon_root / "addon.bat")]
+            else:
+                fake = fixtures / "provider"
+                fake.write_text('#!/bin/sh\ncat "$FAKE_FIXTURE"\n', encoding="utf-8")
+                fake.chmod(0o755)
+                command = ["/bin/sh", str(addon_root / "addon.sh")]
+            environment = {**os.environ, "YT_DLP_BIN": str(fake),
+                           "ERSATZRS_ADDON_SETTING_YT_DLP_BIN": str(fake),
+                           "ERSATZRS_ADDON_CACHE_DIR": str(fixtures / "cache"), "FAKE_FIXTURE": str(playlist)}
+            result = subprocess.run([*command, "discover"], input=json.dumps({
+                "source_url": "https://example.test/playlist", "record_capability": "media-list.list.v6",
+                "limits": {"max_items": 250, "max_output_bytes": 4194304}}),
+                check=False, capture_output=True, text=True, env=environment)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            rows = {row["provider_id"]: row for row in map(json.loads, result.stdout.splitlines()) if row["record_type"] == "item"}
+            self.assertEqual(len(rows), 9)
+            for identity in ["0", "1", "2", "6", "7", "missing"]:
+                self.assertNotIn("duration_seconds", rows[identity])
+            self.assertEqual(rows["3"]["duration_seconds"], 0)
+            self.assertEqual(rows["4"]["duration_seconds"], 0)
+            self.assertEqual(rows["5"]["duration_seconds"], 13)
+
     @unittest.skipUnless(
         shutil.which("deno") or shutil.which("deno.exe"), "deno required"
     )

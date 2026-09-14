@@ -12,6 +12,10 @@ All notable changes are recorded here using Keep a Changelog.
 
 ### Fixed
 
+- yt-dlp 0.11.2 omits unknown durations when discovery returns missing, null,
+  empty or whitespace values, while preserving genuine numeric zero. The
+  media-list protocol is unchanged.
+
 - yt-dlp 0.11.1 keeps addressable playlist entries with missing titles using a fallback
   display title, preserving their order and unknown availability instead of
   aborting the entire import. Import failures no longer falsely report that the

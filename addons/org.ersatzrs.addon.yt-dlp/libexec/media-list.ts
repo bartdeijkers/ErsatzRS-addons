@@ -1,3 +1,4 @@
+import { sourceRatings, sourceStudio } from "./metadata-fields.ts";
 interface Thumbnail {
   url?: string;
   width?: number;
@@ -28,6 +29,7 @@ interface ProviderEntry {
   creators?: string[];
   language?: string;
   album?: string;
+  age_limit?: number;
   thumbnail?: string;
   thumbnail_width?: number;
   thumbnail_height?: number;
@@ -214,7 +216,8 @@ function metadata(
     release_date: date,
     genres: values(entry.categories),
     tags: values(entry.tags),
-    studios: [],
+    studios: sourceStudio(entry.channel, entry.uploader),
+    content_ratings: sourceRatings(entry.age_limit),
     languages: values(entry.language),
     people: people(entry),
     artists: values(entry.artists, entry.artist, entry.creators, entry.creator),
@@ -247,6 +250,10 @@ console.log(JSON.stringify({
     title: listTitle,
     plot: listPlot,
     tags: values(playlist.tags),
+    genres: values(playlist.categories),
+    languages: values(playlist.language),
+    studios: sourceStudio(playlist.channel, playlist.uploader),
+    content_ratings: sourceRatings(playlist.age_limit),
     people: people(playlist),
     original_broadcasters: values(listChannel),
     broadcasters: values(listChannel),

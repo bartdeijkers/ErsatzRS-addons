@@ -1,3 +1,4 @@
+import { sourceRatings } from "./metadata-fields.ts";
 interface Chapter {
   start_time?: number;
   title?: string;
@@ -9,6 +10,7 @@ interface Metadata {
   upload_date?: string;
   release_date?: string;
   release_year?: number;
+  age_limit?: number;
   categories?: string[];
   tags?: string[];
   thumbnail?: string;
@@ -22,7 +24,9 @@ function chapterTime(value: number): string {
   const minutes = Math.floor((seconds % 3600) / 60);
   const remainder = seconds % 60;
   return hours > 0
-    ? `${hours}:${String(minutes).padStart(2, "0")}:${String(remainder).padStart(2, "0")}`
+    ? `${hours}:${String(minutes).padStart(2, "0")}:${
+      String(remainder).padStart(2, "0")
+    }`
     : `${minutes}:${String(remainder).padStart(2, "0")}`;
 }
 
@@ -30,7 +34,10 @@ function chapterInput(chapters: Chapter[] | undefined): string | undefined {
   const lines: string[] = [];
   let lastStart = -1;
   for (const chapter of chapters ?? []) {
-    if (typeof chapter.start_time !== "number" || !Number.isFinite(chapter.start_time) || !chapter.title?.trim()) continue;
+    if (
+      typeof chapter.start_time !== "number" ||
+      !Number.isFinite(chapter.start_time) || !chapter.title?.trim()
+    ) continue;
     const start = Math.round(chapter.start_time);
     if (start <= lastStart) continue;
     lines.push(`${chapterTime(start)} ${chapter.title.trim()}`);
@@ -51,7 +58,9 @@ for (const line of buffered.split(/\r?\n/)) {
   if (!item.id) continue;
   const availability = ["public", "unlisted"].includes(item.availability ?? "")
     ? "available"
-    : ["private", "premium_only", "subscriber_only", "needs_auth"].includes(item.availability ?? "")
+    : ["private", "premium_only", "subscriber_only", "needs_auth"].includes(
+        item.availability ?? "",
+      )
     ? "unavailable"
     : "unknown";
   const rawDate = item.upload_date ?? item.release_date;
@@ -63,6 +72,7 @@ for (const line of buffered.split(/\r?\n/)) {
     plot: item.description ?? null,
     release_date: releaseDate,
     year: item.release_year ?? (rawDate ? Number(rawDate.slice(0, 4)) : null),
+    content_rating: sourceRatings(item.age_limit)[0] ?? null,
     genres: item.categories ?? [],
     tags: item.tags ?? [],
     thumbnail_url: item.thumbnail ?? null,

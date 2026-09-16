@@ -12,6 +12,10 @@ All notable changes are recorded here using Keep a Changelog.
 
 ### Fixed
 
+- yt-dlp 0.11.3 retains playlist genres and languages, maps channel/uploader to
+  studios, and preserves explicit source age limits as `age:<number>` across
+  list and detail metadata. These are source age limits, not national ratings.
+
 - yt-dlp 0.11.2 omits unknown durations when discovery returns missing, null,
   empty or whitespace values, while preserving genuine numeric zero. The
   media-list protocol is unchanged.

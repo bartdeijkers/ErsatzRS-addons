@@ -1,3 +1,4 @@
+import { sourceRatings, sourceStudio } from "./metadata-fields.ts";
 import { boundedCommand, browserArguments } from "./item-options.ts";
 
 type JsonObject = Record<string, unknown>;
@@ -260,6 +261,8 @@ function metadata(entry: JsonObject, collection?: string): JsonObject {
     episode,
     year: year(entry),
     release_date: date,
+    studios: sourceStudio(entry.channel, entry.uploader),
+    content_ratings: sourceRatings(entry.age_limit),
     genres: values(entry.categories),
     tags: values(entry.tags),
     languages: values(entry.language),
@@ -288,10 +291,11 @@ function providerItem(
   const state = availability(entry.availability);
   const reasonCode = availabilityReasonCode(entry.availability);
   const rawDuration = entry.duration;
-  const duration = (typeof rawDuration !== "number" && typeof rawDuration !== "string") ||
+  const duration =
+    (typeof rawDuration !== "number" && typeof rawDuration !== "string") ||
       (typeof rawDuration === "string" && rawDuration.trim() === "")
-    ? undefined
-    : Number(rawDuration);
+      ? undefined
+      : Number(rawDuration);
   const row: JsonObject = {
     record_type: "item",
     provider_id: id,
@@ -308,9 +312,10 @@ function providerItem(
     availability_reason: state === "unavailable" ? "not_playable" : undefined,
     availability_reason_code: reasonCode,
     content_kind: contentKind(entry),
-    duration_seconds: duration !== undefined && Number.isFinite(duration) && duration >= 0
-      ? Math.round(duration)
-      : undefined,
+    duration_seconds:
+      duration !== undefined && Number.isFinite(duration) && duration >= 0
+        ? Math.round(duration)
+        : undefined,
     liveness: liveness(entry),
     additional_image_urls: artwork(entry, "thumb").map((candidate) =>
       candidate.url
@@ -392,6 +397,10 @@ function listRecord(
       title: listTitle,
       plot: listPlot,
       tags: values(playlist.tags),
+      genres: values(playlist.categories),
+      languages: values(playlist.language),
+      studios: sourceStudio(playlist.channel, playlist.uploader),
+      content_ratings: sourceRatings(playlist.age_limit),
       people: people(playlist),
       original_broadcasters: values(channel),
       broadcasters: values(channel),
@@ -700,7 +709,10 @@ function unavailableItem(
   };
 }
 
-async function enrich(request: EnrichRequest, options?: unknown): Promise<void> {
+async function enrich(
+  request: EnrichRequest,
+  options?: unknown,
+): Promise<void> {
   const sourceUrl = safeHttpsUrl(request.item.source_url);
   if (!sourceUrl) {
     emit({
@@ -712,14 +724,22 @@ async function enrich(request: EnrichRequest, options?: unknown): Promise<void> 
     return;
   }
   const arguments_ = [
-    "--no-config", "--no-update", "--quiet", "--skip-download",
-    "--no-playlist", "--dump-single-json",
+    "--no-config",
+    "--no-update",
+    "--quiet",
+    "--skip-download",
+    "--no-playlist",
+    "--dump-single-json",
     ...(options === undefined ? [] : browserArguments(options)),
     sourceUrl,
   ];
   const result = options === undefined
     ? await runProvider(arguments_)
-    : await boundedCommand(ytDlp, ["--cache-dir", ytDlpCacheDir, ...arguments_]);
+    : await boundedCommand(ytDlp, [
+      "--cache-dir",
+      ytDlpCacheDir,
+      ...arguments_,
+    ]);
   if (!result.success) {
     const reasonCode = failureAvailabilityReason(result.stderr);
     if (reasonCode) {
@@ -743,7 +763,9 @@ async function enrich(request: EnrichRequest, options?: unknown): Promise<void> 
       record_type: "outcome",
       outcome: "permanent_failure",
       code: "malformed-provider-response",
-      message: options === undefined ? String(error).slice(0, 768) : "The provider response was malformed.",
+      message: options === undefined
+        ? String(error).slice(0, 768)
+        : "The provider response was malformed.",
     });
     return;
   }
@@ -796,7 +818,12 @@ if (operation === "discover") {
     if (envelope.options === undefined) throw new Error("missing options");
     await enrich(envelope.request, envelope.options);
   } catch {
-    console.error(JSON.stringify({ code: "item-enrichment-failed", message: "Item enrichment failed." }));
+    console.error(
+      JSON.stringify({
+        code: "item-enrichment-failed",
+        message: "Item enrichment failed.",
+      }),
+    );
     Deno.exit(70);
   }
 } else throw new Error("usage: media-list-import.ts discover|enrich");

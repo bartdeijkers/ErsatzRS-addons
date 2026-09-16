@@ -25,6 +25,7 @@ foreach ($itemId in @($env:ERSATZRS_REMOTE_STREAM_ITEM_IDS -split "`r?`n")) {
         plot = if ($item.description) { [string]$item.description } else { $null }
         release_date = $releaseDate
         year = if ($item.release_year) { [int]$item.release_year } elseif ($rawDate) { [int]$rawDate.Substring(0, 4) } else { $null }
+        content_rating = if ($null -ne $item.age_limit -and $item.age_limit -is [ValueType] -and $item.age_limit -isnot [bool] -and [double]$item.age_limit -ge 0 -and [double]$item.age_limit -eq [Math]::Floor([double]$item.age_limit)) { 'age:' + [string]$item.age_limit } else { $null }
         genres = @($item.categories | Where-Object { $null -ne $_ })
         tags = @($item.tags | Where-Object { $null -ne $_ })
         thumbnail_url = if ($item.thumbnail) { [string]$item.thumbnail } else { $null }

@@ -2531,7 +2531,9 @@ printf '%s\n' '{"title":"Fixture playlist","description":"Fixture list descripti
                 '"webpage_url":"https://www.youtube.com/watch?v=video-1",'
                 '"availability":"public","duration":43,"upload_date":"20240822",'
                 '"thumbnail":"https://images.example.test/detail.jpg",'
-                '"live_status":"not_live","categories":["Documentary"]}\n',
+                '"live_status":"not_live","categories":["Documentary"],'
+                '"channel":"Fixture Channel","tags":["archive"],"language":"en",'
+                '"age_limit":0,"release_date":"20240820"}\n',
                 encoding="utf-8",
             )
             calls = fixtures / "calls.txt"
@@ -2620,6 +2622,14 @@ printf '%s\n' '{"title":"Fixture playlist","description":"Fixture list descripti
             self.assertEqual(detail_rows[0]["outcome"], "complete")
             self.assertEqual(detail_rows[1]["title"], "Detailed title")
             self.assertEqual(detail_rows[1]["metadata"]["release_date"], "2024-08-22")
+            metadata = detail_rows[1]["metadata"]
+            self.assertEqual(metadata["plot"], "Detailed plot")
+            self.assertEqual(metadata["studios"], ["Fixture Channel"])
+            self.assertEqual(metadata["content_ratings"], ["age:0"])
+            self.assertEqual(metadata["genres"], ["Documentary"])
+            self.assertEqual(metadata["tags"], ["archive"])
+            self.assertEqual(metadata["languages"], ["en"])
+            self.assertEqual(metadata["original_broadcasters"], ["Fixture Channel"])
             all_calls = calls.read_text(encoding="utf-8").splitlines()
             self.assertEqual(len(all_calls), 2)
             self.assertTrue(all("--cache-dir" in call for call in all_calls))

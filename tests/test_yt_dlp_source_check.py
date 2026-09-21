@@ -255,7 +255,12 @@ if mode == "failure":
             self.assertIsNone(bundle.testzip())
             path = "addons/org.ersatzrs.addon.yt-dlp/"
             for filename in ["libexec/source-check.ts", "libexec/item-options.ts", "addon.sh", "addon.bat"]:
-                self.assertEqual(bundle.read(path + filename), (ADDON / filename).read_bytes())
+                expected = (ADDON / filename).read_bytes()
+                if filename == "addon.bat":
+                    # Windows entrypoints have a platform-independent CRLF
+                    # package contract; other source files remain byte-exact.
+                    expected = expected.replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")
+                self.assertEqual(bundle.read(path + filename), expected)
 
 
 if __name__ == "__main__":

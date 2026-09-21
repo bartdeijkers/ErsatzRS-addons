@@ -96,7 +96,12 @@ def write_bundle(output: pathlib.Path) -> tuple[int, str]:
                 info.compress_type = zipfile.ZIP_DEFLATED
                 mode = modes.get(relative, fallback_mode(path))
                 info.external_attr = mode << 16
-                archive.writestr(info, path.read_bytes(), compresslevel=9)
+                contents = path.read_bytes()
+                if path.suffix.lower() in {".bat", ".cmd"}:
+                    # cmd.exe can lose CALL labels in LF-only batch files. Make
+                    # published bytes independent of the checkout platform.
+                    contents = contents.replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")
+                archive.writestr(info, contents, compresslevel=9)
         os.replace(temporary, output)
     finally:
         temporary.unlink(missing_ok=True)

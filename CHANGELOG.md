@@ -12,6 +12,10 @@ All notable changes are recorded here using Keep a Changelog.
 
 ### Fixed
 
+- yt-dlp 0.11.4 preserves structured Windows import errors by packaging batch
+  entrypoints with CRLF line endings on every build platform. The bundle test
+  checks the ZIP bytes and exercises its extracted error path on Windows.
+
 - yt-dlp 0.11.3 retains playlist genres and languages, maps channel/uploader to
   studios, and preserves explicit source age limits as `age:<number>` across
   list and detail metadata. These are source age limits, not national ratings.

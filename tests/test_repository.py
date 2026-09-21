@@ -95,6 +95,29 @@ class RepositoryTests(unittest.TestCase):
                 )
                 self.assertNotEqual((shell.external_attr >> 16) & 0o111, 0)
 
+                batch_files = [name for name in names if name.endswith((".bat", ".cmd"))]
+                self.assertTrue(batch_files)
+                for name in batch_files:
+                    contents = archive.read(name)
+                    self.assertIn(b"\r\n", contents, name)
+                    self.assertNotIn(b"\n", contents.replace(b"\r\n", b""), name)
+                    self.assertNotIn(b"\r\r\n", contents, name)
+
+                if os.name == "nt":
+                    archive.extractall(pathlib.Path(temporary) / "extracted")
+                    addon = (
+                        pathlib.Path(temporary) / "extracted" / "addons"
+                        / "org.ersatzrs.addon.yt-dlp" / "addon.bat"
+                    )
+                    rejected = subprocess.run(
+                        [os.environ.get("COMSPEC", "cmd.exe"), "/d", "/c", str(addon), "unsupported-operation"],
+                        cwd=temporary, capture_output=True, text=True, check=False, timeout=10,
+                        env={**os.environ, "ERSATZRS_ADDON_CACHE_DIR": str(pathlib.Path(temporary) / "cache")},
+                    )
+                    self.assertEqual(rejected.returncode, 64)
+                    self.assertEqual(self.final_operation_error(rejected)["code"], "operation-failed")
+                    self.assertEqual(rejected.stdout, "")
+
     def final_operation_error(self, result: subprocess.CompletedProcess[str]) -> dict[str, str]:
         self.assertNotEqual(result.returncode, 0)
         payload = json.loads(result.stderr.splitlines()[-1])

@@ -286,10 +286,21 @@ function providerItem(
     safeHttpsUrl(entry.original_url) ??
     safeHttpsUrl(entry.url);
   if (!id || !sourceUrl) return undefined;
-  // Flat discovery can omit a title without establishing unavailability.
+  // The YouTube tab extractor retains removed playlist slots as URL entries
+  // without a title, channel or duration. Other extractors can omit a title
+  // for playable media, so this signal is deliberately YouTube-specific.
+  const removedYouTubeSlot = entry._type === "url" &&
+    entry.ie_key === "Youtube" && entry.availability == null &&
+    !text(entry.title) &&
+    !text(entry.channel) && !text(entry.uploader) &&
+    entry.duration == null;
   const title = text(entry.title) ?? `Untitled video (${id})`;
-  const state = availability(entry.availability);
-  const reasonCode = availabilityReasonCode(entry.availability);
+  const state = removedYouTubeSlot
+    ? "unavailable"
+    : availability(entry.availability);
+  const reasonCode = removedYouTubeSlot
+    ? "unavailable"
+    : availabilityReasonCode(entry.availability);
   const rawDuration = entry.duration;
   const duration =
     (typeof rawDuration !== "number" && typeof rawDuration !== "string") ||

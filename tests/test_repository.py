@@ -2492,6 +2492,14 @@ printf '%s\n' '{"title":"Fixture playlist","description":"Fixture list descripti
                 entries.append({"id": str(index), "title": f"Fixture {index}",
                                 "webpage_url": f"https://example.test/video/{index}", "duration": duration})
             entries.append({"id": "missing", "title": "Missing duration", "webpage_url": "https://example.test/video/missing"})
+            entries.append({"id": "removed", "title": None, "duration": None,
+                            "_type": "url", "ie_key": "Youtube",
+                            "webpage_url": "https://www.youtube.com/watch?v=removed"})
+            entries.append({"id": "untitled", "title": None, "duration": None,
+                            "webpage_url": "https://example.test/video/untitled"})
+            entries.append({"id": "private", "title": None, "duration": None,
+                            "_type": "url", "ie_key": "Youtube", "availability": "private",
+                            "webpage_url": "https://www.youtube.com/watch?v=private"})
             playlist = fixtures / "playlist.json"
             playlist.write_text(json.dumps({"id": "fixture", "title": "Duration fixture", "entries": entries}), encoding="utf-8")
             if os.name == "nt":
@@ -2512,12 +2520,16 @@ printf '%s\n' '{"title":"Fixture playlist","description":"Fixture list descripti
                 check=False, capture_output=True, text=True, env=environment)
             self.assertEqual(result.returncode, 0, result.stderr)
             rows = {row["provider_id"]: row for row in map(json.loads, result.stdout.splitlines()) if row["record_type"] == "item"}
-            self.assertEqual(len(rows), 9)
+            self.assertEqual(len(rows), 12)
             for identity in ["0", "1", "2", "6", "7", "missing"]:
                 self.assertNotIn("duration_seconds", rows[identity])
             self.assertEqual(rows["3"]["duration_seconds"], 0)
             self.assertEqual(rows["4"]["duration_seconds"], 0)
             self.assertEqual(rows["5"]["duration_seconds"], 13)
+            self.assertEqual(rows["removed"]["availability"], "unavailable")
+            self.assertEqual(rows["removed"]["availability_reason_code"], "unavailable")
+            self.assertEqual(rows["untitled"]["availability"], "unknown")
+            self.assertEqual(rows["private"]["availability_reason_code"], "content_restricted")
 
     @unittest.skipUnless(
         shutil.which("deno") or shutil.which("deno.exe"), "deno required"

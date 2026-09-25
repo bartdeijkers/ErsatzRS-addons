@@ -12,6 +12,10 @@ All notable changes are recorded here using Keep a Changelog.
 
 ### Fixed
 
+- yt-dlp 0.11.5 marks YouTube playlist slots with no title, channel or duration
+  as unavailable during discovery, while retaining unknown status for generic
+  untitled entries.
+
 - yt-dlp 0.11.4 preserves structured Windows import errors by packaging batch
   entrypoints with CRLF line endings on every build platform. The bundle test
   checks the ZIP bytes and exercises its extracted error path on Windows.

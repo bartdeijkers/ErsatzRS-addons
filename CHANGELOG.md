@@ -4,6 +4,8 @@ All notable changes are recorded here using Keep a Changelog.
 
 ## [Unreleased]
 
+## [0.11.6] - 2026-10-01
+
 ### Changed
 
 - yt-dlp 0.11.6 supports the stable ErsatzRS 1.1 host version while retaining
@@ -57,3 +59,6 @@ All notable changes are recorded here using Keep a Changelog.
   The configured executable owns its update through `-U`; bounded results
   distinguish updated, already current, manual update required, and failed
   outcomes without exposing native diagnostic text.
+
+[Unreleased]: https://github.com/bartdeijkers/ErsatzRS-addons/compare/v0.11.6...HEAD
+[0.11.6]: https://github.com/bartdeijkers/ErsatzRS-addons/releases/tag/v0.11.6

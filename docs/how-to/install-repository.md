@@ -1,5 +1,9 @@
 # Install or update the add-on repository
 
+For ErsatzRS 1.1, use yt-dlp 0.11.6 or newer. Update the installed add-on in
+**Settings > Add-ons** before upgrading the host. Earlier beta hosts also accept
+0.11.6; updating the repository alone does not replace installed add-on copies.
+
 Use a Git checkout when the ErsatzRS host can access files maintained by your
 normal Git tooling. Use an offline bundle when the host must not have repository
 access. Both methods expose the same add-ons and require **Unknown sources**.

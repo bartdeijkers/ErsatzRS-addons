@@ -4,6 +4,12 @@ All notable changes are recorded here using Keep a Changelog.
 
 ## [Unreleased]
 
+### Fixed
+
+- Attach release bundles with an explicit repository when the publishing job
+  has no Git checkout. Allow manual validation and attachment of an existing
+  release tag without moving the tag or changing its package source.
+
 ## [0.11.6] - 2026-10-01
 
 ### Changed

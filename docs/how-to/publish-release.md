@@ -69,3 +69,16 @@ gh workflow run publish.yml --ref main
 
 A manual run performs the Windows and Linux validation and uploads an Actions
 artifact. The release-attachment job is skipped.
+
+## Recover an interrupted release attachment
+
+If a published release is missing its bundle because attachment failed, run:
+
+```sh
+gh workflow run publish.yml --ref main -f release_tag=<existing-release-tag>
+```
+
+The workflow checks out that existing tag for both Windows and Linux validation,
+then attaches its bundle using the current publishing workflow. It does not move
+the tag or build the package from current `main`. Verify the downloaded archive
+after the workflow finishes, as for an ordinary release.

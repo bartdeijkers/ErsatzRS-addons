@@ -1,9 +1,9 @@
 manifest_version = 6
 id = "org.ersatzrs.addon.yt-dlp"
-version = "0.11.5"
+version = "0.11.6"
 license = "Zlib"
 source_url = "https://github.com/bartdeijkers/ErsatzRS-addons/tree/main/addons/org.ersatzrs.addon.yt-dlp"
-host_version = ">=0.1.0, <0.2.0"
+host_version = ">=0.1.0, <1.2.0"
 
 # Playback works for anything yt-dlp supports, which is why network_hosts is
 # unrestricted. Media-list import is not: yt-dlp fully extracts the supplied

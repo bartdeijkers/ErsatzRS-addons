@@ -4,6 +4,13 @@ All notable changes are recorded here using Keep a Changelog.
 
 ## [Unreleased]
 
+### Changed
+
+- yt-dlp 0.11.6 supports the stable ErsatzRS 1.1 host version while retaining
+  compatibility with the 0.1 development host used by earlier beta releases.
+  Update the add-on before upgrading ErsatzRS; capabilities and entrypoints
+  are unchanged.
+
 ### Removed
 
 - Retire official Beeld & Geluid support and its active usage documentation.

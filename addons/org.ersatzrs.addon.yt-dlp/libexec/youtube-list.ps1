@@ -56,11 +56,15 @@ try {
         $genres = @($entry.categories | Where-Object { $null -ne $_ })
         $tags = @($entry.tags | Where-Object { $null -ne $_ })
         $liveness = Liveness $entry
+        $title = [string]$entry.title
+        if ([string]::IsNullOrWhiteSpace($title)) {
+            $title = 'Untitled video (' + [string]$entry.id + ')'
+        }
         $row = [ordered]@{
             id = [string]$entry.id
             provider_id = [string]$entry.id
             url = $url
-            title = [string]$entry.title
+            title = $title
             plot = if ($entry.description) { [string]$entry.description } else { $null }
             genres = $genres
             tags = $tags

@@ -6,6 +6,12 @@ All notable changes are recorded here using Keep a Changelog.
 
 ### Fixed
 
+- yt-dlp 0.11.7 preserves addressable Windows Remote Stream playlist entries
+  with missing or blank titles using the same identity-based fallback as
+  media-list import.
+  Keep provider availability and entry order, so one untitled item cannot abort
+  synchronization of the entire playlist.
+
 - Attach release bundles with an explicit repository when the publishing job
   has no Git checkout. Allow manual validation and attachment of an existing
   release tag without moving the tag or changing its package source.

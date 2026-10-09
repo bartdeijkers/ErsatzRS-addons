@@ -73,8 +73,8 @@ try {
             content_kind = ContentKind $entry
             guids = @('yt-dlp://' + [string]$entry.id)
             liveness = $liveness
-            is_live = $liveness -eq 'live'
         }
+        if ($liveness -ne 'unknown') { $row.is_live = $liveness -eq 'live' }
         $reason = AvailabilityReason $entry
         if ($reason) { $row.availability_reason = $reason }
         if ($null -ne $entry.duration) { $row.duration_seconds = [uint64]$entry.duration }

@@ -6,6 +6,10 @@ All notable changes are recorded here using Keep a Changelog.
 
 ### Fixed
 
+- yt-dlp 0.11.8 omits the legacy `is_live` hint for unknown Windows Remote
+  Stream playlist liveness. Unknown entries no longer contradict a false live
+  hint and abort an entire synchronization; finite and live hints are preserved.
+
 - yt-dlp 0.11.7 preserves addressable Windows Remote Stream playlist entries
   with missing or blank titles using the same identity-based fallback as
   media-list import.

@@ -6,6 +6,15 @@ All notable changes are recorded here using Keep a Changelog.
 
 ### Fixed
 
+- yt-dlp 0.11.11 removes empty manual SRT cues before artifact verification,
+  preserving every visible cue and timestamp so subtitle preparation no longer
+  loops and blocks automatic list publication. Malformed cues remain rejected.
+
+- yt-dlp 0.11.11 publishes authenticated videos when full metadata extraction
+  succeeds with usable media formats despite a retained `needs_auth` label.
+  Failed extraction, missing formats and other restricted-source labels remain
+  unavailable; browser settings and source restrictions are preserved.
+
 - yt-dlp 0.11.8 omits the legacy `is_live` hint for unknown Windows Remote
   Stream playlist liveness. Unknown entries no longer contradict a false live
   hint and abort an entire synchronization; finite and live hints are preserved.

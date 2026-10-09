@@ -45,7 +45,7 @@ elif "--no-simulate" in args and "--skip-download" in args and "--write-subs" in
     for language in args[args.index("--sub-langs") + 1].split(","):
         language = language.removeprefix("^").removesuffix("$")
         path = pathlib.Path(template.replace(".%(ext)s", "." + language + ".srt"))
-        path.write_bytes(b"1\\n00:00:03,000 --> 00:00:05,000\\nManual fixture\\n")
+        path.write_bytes(os.environ.get("FIXTURE_SUBTITLE_TEXT", "1\\n00:00:03,000 --> 00:00:05,000\\nManual fixture\\n").encode("utf-8"))
         tracks[language] = {"ext": "srt", "filepath": str(path)}
     print(json.dumps(tracks))
 elif "--no-simulate" in args and "--output" in args and args[args.index("--output") + 1] != "-":
@@ -165,6 +165,20 @@ else:
                           "en": [{"ext": "srt"}], "de": [{"ext": "srt"}]},
             "automatic_captions": {"fr": [{"ext": "vtt"}]},
         })
+
+    def test_subtitle_artifacts_remove_empty_cues_before_hashing(self) -> None:
+        self.manual_subtitle_metadata()
+        visible = "2\n00:00:03,000 --> 00:00:05,000\nManual <i>fixture</i>\n\n"
+        self.environment["FIXTURE_SUBTITLE_TEXT"] = "1\n00:00:01,000 --> 00:00:02,000\n\n" + visible
+        result = self.invoke("subtitles", self.subtitle_request())
+        self.assertEqual(result.returncode, 0, result.stderr)
+        tracks = json.loads(result.stdout)["subtitles"]
+        self.assertEqual(len(tracks), 2)
+        for track in tracks:
+            data = (self.stage / track["relative_path"]).read_bytes()
+            self.assertEqual(data.decode("utf-8").strip(), visible.strip())
+            self.assertEqual(track["byte_length"], len(data))
+            self.assertEqual(track["sha256"], hashlib.sha256(data).hexdigest())
 
     def test_subtitle_only_download_is_manual_explicit_bounded_and_source_clock(self) -> None:
         self.manual_subtitle_metadata()
@@ -496,6 +510,54 @@ else:
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(self.arguments(), [])
 
+    def test_authenticated_enrichment_requires_usable_media_formats(self) -> None:
+        request = self.request("firefox")
+        envelope = {"options": request["options"], "request": {
+            "source_url": request["source_url"], "provider_id": "fixture",
+            "record_capability": "media-list.list.v6", "overview_fingerprint": "a" * 64,
+            "item": {"source_url": request["source_url"], "rank": 4},
+        }}
+        video = {"url": "https://media.example.test/video.mp4", "vcodec": "avc1", "acodec": "none"}
+        cases = [
+            ("needs_auth", [video], "available"),
+            ("needs_auth", [{**video, "vcodec": "none", "acodec": "opus"}], "available"),
+            ("needs_auth", [], "unavailable"),
+            ("needs_auth", [{"vcodec": "avc1"}], "unavailable"),
+            ("needs_auth", [{**video, "has_drm": True}], "unavailable"),
+            ("needs_auth", [{**video, "vcodec": "none"}], "unavailable"),
+            ("private", [video], "unavailable"),
+            ("premium_only", [video], "unavailable"),
+            ("subscriber_only", [video], "unavailable"),
+        ]
+        for availability, formats, expected in cases:
+            with self.subTest(availability=availability, formats=formats):
+                self.environment["FIXTURE_RESOLVE"] = json.dumps({
+                    "id": "fixture", "title": "Fixture", "webpage_url": request["source_url"],
+                    "availability": availability, "formats": formats, "duration": 100,
+                })
+                result = self.invoke("enrich-options", envelope)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                rows = [json.loads(line) for line in result.stdout.splitlines()]
+                self.assertEqual(rows[1]["availability"], expected)
+                self.assertEqual(rows[0]["outcome"], "complete" if expected == "available" else "unavailable")
+                if expected == "available":
+                    self.assertNotIn("availability_reason", rows[1])
+                    self.assertNotIn("availability_reason_code", rows[1])
+                else:
+                    self.assertIn("availability_reason_code", rows[1])
+                args = self.arguments()[-1]
+                self.assertEqual(args[args.index("--cookies-from-browser") + 1], "firefox")
+        self.environment["FIXTURE_MODE"] = "resolve-failure"
+        self.environment["FIXTURE_RESOLVE"] = json.dumps({
+            "id": "fixture", "title": "Fixture", "webpage_url": request["source_url"],
+            "availability": "needs_auth", "formats": [video], "duration": 100,
+        })
+        result = self.invoke("enrich-options", envelope)
+        rows = [json.loads(line) for line in result.stdout.splitlines()]
+        self.assertNotEqual(rows[0]["outcome"], "complete")
+        for row in rows[1:]:
+            self.assertEqual(row["availability"], "unavailable")
+
     def test_options_aware_enrichment_reuses_metadata_mapper(self) -> None:
         request = self.request("chrome")
         envelope = {"options": request["options"], "request": {
@@ -511,6 +573,18 @@ else:
         self.assertEqual(rows[1]["rank"], 4)
         args = self.arguments()[-1]
         self.assertEqual(args[args.index("--cookies-from-browser") + 1], "chrome")
+
+
+@unittest.skipUnless(os.name == "nt" and shutil.which("deno"), "Windows and Deno required")
+class WindowsAuthenticatedEnrichmentTests(unittest.TestCase):
+    def test_authenticated_enrichment_through_native_entrypoint(self) -> None:
+        result = subprocess.run(
+            ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+             str(ROOT / "tests" / "test_yt_dlp_authenticated_enrichment_windows.ps1")],
+            capture_output=True, text=True, timeout=90,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("PASS: 10 native Windows", result.stdout)
 
 
 class ItemTransportTests(unittest.TestCase):

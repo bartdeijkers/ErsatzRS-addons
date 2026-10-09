@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { basename, join, resolve } from "node:path";
 import { boundedCommand, browserArguments, itemOptions } from "./item-options.ts";
 import { playIntervals } from "./stream-playback.ts";
+import { removeEmptySrtCues } from "./subtitle-normalization.ts";
 
 type Request = Record<string, unknown>;
 const ytDlp = Deno.env.get("YT_DLP_BIN") || "yt-dlp";
@@ -249,11 +250,15 @@ async function subtitleArtifacts(
     if (!fileInfo.isFile || fileInfo.isSymlink || fileInfo.size <= 0 || fileInfo.size > maximumFile) {
       throw new Error("subtitle exceeds budget");
     }
-    const digest = createHash("sha256");
-    const file = await Deno.open(path, { read: true });
-    for await (const chunk of file.readable) { remaining(); digest.update(chunk); }
+    const original = await Deno.readFile(path);
+    remaining();
+    const bytes = removeEmptySrtCues(original);
+    if (!bytes.length) continue;
+    if (bytes !== original) await Deno.writeFile(path, bytes);
+    remaining();
+    const digest = createHash("sha256").update(bytes);
     artifacts.push({ language, format: "srt", provenance: "manual", timeline,
-      relative_path: relativePath, byte_length: fileInfo.size, sha256: digest.digest("hex") });
+      relative_path: relativePath, byte_length: bytes.length, sha256: digest.digest("hex") });
   }
   return artifacts;
 }

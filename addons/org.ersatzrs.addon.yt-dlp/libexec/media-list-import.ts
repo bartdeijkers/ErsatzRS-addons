@@ -797,6 +797,25 @@ async function enrich(
     return;
   }
   mapped.provider_id = request.provider_id;
+  // yt-dlp retains needs_auth after authenticated extraction succeeds. The
+  // restriction describes the source; usable formats prove this account's
+  // access. Flat discovery and failed extraction cannot supply this evidence.
+  if (
+    entry.availability === "needs_auth" && Array.isArray(entry.formats) &&
+    entry.formats.some((value) => {
+      const format = object(value);
+      if (!format || format.has_drm === true || !safeHttpsUrl(format.url)) {
+        return false;
+      }
+      return [format.acodec, format.vcodec].some((codec) =>
+        typeof codec === "string" && codec.trim() !== "" && codec !== "none"
+      );
+    })
+  ) {
+    mapped.availability = "available";
+    delete mapped.availability_reason;
+    delete mapped.availability_reason_code;
+  }
   const state = mapped.availability;
   emit({
     record_type: "outcome",

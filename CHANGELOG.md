@@ -4,6 +4,8 @@ All notable changes are recorded here using Keep a Changelog.
 
 ## [Unreleased]
 
+## [0.11.11] - 2026-10-28
+
 ### Fixed
 
 - yt-dlp 0.11.11 removes empty manual SRT cues before artifact verification,
@@ -85,5 +87,6 @@ All notable changes are recorded here using Keep a Changelog.
   distinguish updated, already current, manual update required, and failed
   outcomes without exposing native diagnostic text.
 
-[Unreleased]: https://github.com/bartdeijkers/ErsatzRS-addons/compare/v0.11.6...HEAD
+[Unreleased]: https://github.com/bartdeijkers/ErsatzRS-addons/compare/v0.11.11...HEAD
+[0.11.11]: https://github.com/bartdeijkers/ErsatzRS-addons/compare/v0.11.6...v0.11.11
 [0.11.6]: https://github.com/bartdeijkers/ErsatzRS-addons/releases/tag/v0.11.6

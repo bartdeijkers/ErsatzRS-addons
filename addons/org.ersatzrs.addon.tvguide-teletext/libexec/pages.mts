@@ -68,10 +68,21 @@ type Draft = {
   binding: string;
 };
 class Rejection extends Error {
-  constructor(readonly code: string, message: string) {
+  readonly code: string;
+  constructor(code: string, message: string) {
     super(message);
+    this.code = code;
   }
 }
+// A minimal standard Node boundary; Deno continues using its permission-scoped APIs.
+declare const process: {
+  argv: string[];
+  stdin: AsyncIterable<Uint8Array>;
+  env: Record<string, string | undefined>;
+  exit(code: number): never;
+};
+const onDeno = typeof Deno !== "undefined";
+
 function reject(code: string, message: string): never {
   throw new Rejection(code, message);
 }
@@ -559,7 +570,7 @@ export function generate(request: Request, config: Settings) {
 }
 if (import.meta.main) {
   try {
-    if (Deno.args[0] === "check") {
+    if ((onDeno ? Deno.args : process.argv.slice(2))[0] === "check") {
       console.log(
         JSON.stringify({
           status: "ready",
@@ -567,10 +578,12 @@ if (import.meta.main) {
           message: "TV-guide teletext producer is available.",
         }),
       );
-    } else if (Deno.args[0] === "pages") {
+    } else if ((onDeno ? Deno.args : process.argv.slice(2))[0] === "pages") {
       const chunks: Uint8Array[] = [];
       let bytes = 0;
-      for await (const chunk of Deno.stdin.readable) {
+      for await (
+        const chunk of (onDeno ? Deno.stdin.readable : process.stdin)
+      ) {
         bytes += chunk.length;
         if (bytes > 4 * 1024 * 1024) {
           reject(
@@ -602,7 +615,8 @@ if (import.meta.main) {
           "FOOTER",
         ]
       ) {
-        const value = Deno.env.get(`ERSATZRS_ADDON_SETTING_${key}`);
+        const variable = `ERSATZRS_ADDON_SETTING_${key}`;
+        const value = onDeno ? Deno.env.get(variable) : process.env[variable];
         if (value !== undefined) env[key] = value;
       }
       const result = JSON.stringify(generate(request, settings(env)));
@@ -628,6 +642,7 @@ if (import.meta.main) {
           : "The supplied guide request is invalid.",
       }),
     );
-    Deno.exit(65);
+    if (onDeno) Deno.exit(65);
+    else process.exit(65);
   }
 }

@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import json
 import os
+import platform
 import pathlib
 import shutil
 import subprocess
@@ -15,6 +16,8 @@ except ModuleNotFoundError:
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 PACKAGE = ROOT / "addons/org.ersatzrs.addon.tvguide-teletext"
+RUNTIME = os.environ.get("ERSATZRS_TVGUIDE_TEST_RUNTIME") or (
+    "node" if platform.machine().lower().startswith("arm") and platform.machine().lower() != "arm64" else "deno")
 CULTURES = {"en-US", "nl", "de-DE", "fr-FR", "it-IT", "pl", "pt-BR", "es-419", "es-ES"}
 
 
@@ -42,15 +45,17 @@ def request() -> dict:
                                       "later_today": [programmes[1]["identity"]], "ambiguous": False}}]}
 
 
-@unittest.skipUnless(shutil.which("deno"), "Deno is required for the production producer")
+@unittest.skipUnless(shutil.which(RUNTIME), "Selected JavaScript runtime is required for the production producer")
 class TvGuideTeletextTests(unittest.TestCase):
     def invoke(self, value=None, settings=None, operation="pages", raw=None):
         env = {k: v for k, v in os.environ.items() if not k.startswith("ERSATZRS_ADDON_SETTING_")}
         env.update({"ERSATZRS_ADDON_SETTING_" + k: str(v) for k, v in (settings or {}).items()})
-        if os.name == "nt":
+        if RUNTIME == "node" and os.name == "nt":
+            cmd = [shutil.which("node"), str(PACKAGE / "libexec/pages.mts"), operation]
+        elif os.name == "nt":
             cmd = [os.environ.get("COMSPEC", "cmd.exe"), "/d", "/c", str(PACKAGE / "addon.bat"), operation]
         else:
-            cmd = [str(PACKAGE / "addon.sh"), operation]
+            cmd = [str(PACKAGE / ("addon-node.sh" if RUNTIME == "node" else "addon.sh")), operation]
         if raw is None:
             raw = json.dumps(value if value is not None else request(), ensure_ascii=False).encode()
         return subprocess.run(cmd, input=raw, capture_output=True, env=env,
@@ -234,7 +239,11 @@ class TvGuideTeletextTests(unittest.TestCase):
         self.assertEqual(manifest["permissions"]["network_hosts"], [])
         self.assertFalse(manifest["permissions"]["media_read"])
         self.assertFalse(manifest["permissions"]["managed_ffmpeg"])
-        self.assertEqual(manifest["permissions"]["external_commands"], ["deno"])
+        self.assertEqual(manifest["permissions"]["external_commands"], ["deno", "node"])
+        self.assertEqual(manifest["entrypoints"]["linux-arm"]["path"], "addon-node.sh")
+        for rid in ["linux-x64", "linux-arm64"]:
+            self.assertEqual(manifest["entrypoints"][rid]["path"], "addon.sh")
+        self.assertEqual(manifest["entrypoints"]["win-x64"]["path"], "addon.bat")
         for setting in manifest["settings"]:
             self.assertEqual(set(setting["label"]), CULTURES)
         self.assertEqual(set(manifest["name"]), CULTURES)

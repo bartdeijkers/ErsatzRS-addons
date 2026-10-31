@@ -1,7 +1,11 @@
 # TV-guide teletext
 
-A local, network-free `teletext.pages.v3` producer for ErsatzRS 1.1.x. It requires
-Deno 2 and explicit installation/enabling in the host. No NOS data is fetched.
+A local, network-free `teletext.pages.v3` producer for ErsatzRS 1.1.x with the
+accepted Phase 9A v3 host contract. Explicit installation/enabling is required.
+Linux x64, Linux ARM64 and Windows use Deno 2. Linux ARMv7 uses Node.js 22.18 or
+newer because Deno has no official ARMv7 binary. Debian-family ARMv7 systems
+also need the standard `libatomic1` system library for the official Node binary.
+No runtime is installed automatically. No NOS data is fetched.
 Only the numbered TV-guide index, compact listings, subpages and colour-key
 navigation of [NOS pages 200–299](https://nos.nl/teletekst/200) inform this
 independent layout; names, branding, news and other NOS sections are excluded.
@@ -42,7 +46,17 @@ collision rejection, preview, atomic publication, stale/last-good policy, actual
 streaming and playback safety. A successful producer call is not publication.
 
 Manual invocation accepts a host request on stdin and writes one complete JSON
-response on stdout: `./addon.sh pages` (Windows: `addon.bat pages`). Settings
+response on stdout: `./addon.sh pages` (Windows: `addon.bat pages`; ARMv7:
+`./addon-node.sh pages`). Both runtimes execute the same `libexec/pages.mts`
+producer; there is no separate page generator. Settings
 enter only through the existing `ERSATZRS_ADDON_SETTING_<KEY>` environment.
-`check` reports runtime readiness. This package uses no network, filesystem,
-media, process-spawning or managed-FFmpeg permission inside Deno.
+`check` reports runtime readiness. The producer accesses only stdin/stdout and
+the declared settings; it performs no network, media, filesystem or subprocess
+operation. Deno additionally receives its existing restricted environment grant.
+Node is an explicitly declared external command within the host's existing
+permission-reviewed addon boundary; it is not represented as a Deno sandbox.
+
+The manifest chooses the appropriate entrypoint per RID. The same source was
+qualified with Deno 2.9.5/2.9.8 and Node 22.21.1/22.23.4. ARM software checks use
+emulation; native ARM remains deferred, not verified. Version 0.1.1 changes the
+runtime boundary, not template revision 1 or the page/metadata contract.

@@ -4,6 +4,13 @@ All notable changes are recorded here using Keep a Changelog.
 
 ## [Unreleased]
 
+### Fixed
+
+- TV-guide teletext 0.1.1 runs the same producer on Linux ARMv7 through Node.js
+  22.18+, retaining Deno on Linux x64/ARM64 and Windows. Declare the required
+  ARMv7 `libatomic1` dependency, preserve exact pages/metadata and template
+  revision, and keep package installation/permission review explicit.
+
 ### Added
 
 - TV-guide teletext 0.1.0: generate complete host-supplied programme listings,

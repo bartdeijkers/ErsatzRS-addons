@@ -1,6 +1,6 @@
 manifest_version = 6
 id = "org.ersatzrs.addon.tvguide-teletext"
-version = "0.1.0"
+version = "0.1.1"
 license = "Zlib"
 source_url = "https://github.com/bartdeijkers/ErsatzRS-addons/tree/main/addons/org.ersatzrs.addon.tvguide-teletext"
 host_version = ">=1.1.0, <1.2.0"
@@ -23,7 +23,7 @@ path = "addon.sh"
 kind = "posix_shell"
 
 [entrypoints."linux-arm"]
-path = "addon.sh"
+path = "addon-node.sh"
 kind = "posix_shell"
 
 [entrypoints."osx-x64"]
@@ -42,7 +42,7 @@ kind = "windows_batch"
 network_hosts = []
 media_read = false
 managed_ffmpeg = false
-external_commands = ["deno"]
+external_commands = ["deno", "node"]
 
 [[settings]]
 key = "PAGE_START"

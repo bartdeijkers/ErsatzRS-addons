@@ -4,6 +4,16 @@ All notable changes are recorded here using Keep a Changelog.
 
 ## [Unreleased]
 
+### Added
+
+- TV-guide teletext 0.1.0: generate complete host-supplied programme listings,
+  Now/Next/Continuing/Later Today and index/subpage/colour-key navigation through
+  the existing v3 contract. Named per-channel profiles choose output ranges,
+  index pages, colour/layout themes and custom header/footer zones. Keep native
+  template/theme/edit-boundary metadata, complete long Unicode titles and
+  timezone/DST distinctions; reject invalid or oversized contributions without
+  partial output. Installation and publication remain explicit host actions.
+
 ## [0.11.11] - 2026-10-28
 
 ### Fixed

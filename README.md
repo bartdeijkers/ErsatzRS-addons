@@ -10,14 +10,18 @@ remains an immutable host-managed copy until an operator confirms an update.
 
 ## Add-ons
 
+- [TV-guide teletext](addons/org.ersatzrs.addon.tvguide-teletext/README.md) (unreleased) creates
+  profile-scoped teletext guides with page-range/index selection, themes and
+  custom zones from the host's read-only programme context.
 - [yt-dlp](addons/org.ersatzrs.addon.yt-dlp/README.md) streams supported remote
   media through an operator-installed yt-dlp and imports public playlists or
   individual videos as add-on lists.
 
 Beeld & Geluid is retired and unsupported by maintainer decision. Do not
-access that service for development or acceptance. Current bundles contain
-only yt-dlp; existing operator-managed installations and data are not
-automatically removed.
+access that service for development or acceptance. Source bundles include yt-dlp and TV-guide teletext. The published v0.11.11
+bundle contains only yt-dlp; the new guide package requires this checkout or a
+locally built complete bundle until a new release is approved. Existing
+operator-managed installations and data are not automatically removed.
 
 ## Documentation
 

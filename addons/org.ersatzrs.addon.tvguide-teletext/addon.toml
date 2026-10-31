@@ -1,0 +1,109 @@
+manifest_version = 6
+id = "org.ersatzrs.addon.tvguide-teletext"
+version = "0.1.0"
+license = "Zlib"
+source_url = "https://github.com/bartdeijkers/ErsatzRS-addons/tree/main/addons/org.ersatzrs.addon.tvguide-teletext"
+host_version = ">=1.1.0, <1.2.0"
+
+name = { "en-US" = "TV-guide teletext", "nl" = "TV-gids teletekst", "de-DE" = "TV-Guide-Videotext", "fr-FR" = "Télétexte du guide TV", "it-IT" = "Televideo guida TV", "pl" = "Teletekst programu TV", "pt-BR" = "Teletexto do guia de TV", "es-419" = "Teletexto de guía de TV", "es-ES" = "Teletexto de la guía de TV" }
+summary = { "en-US" = "Create teletext pages from your ErsatzRS programme guide.", "nl" = "Maak teletekstpagina’s van je ErsatzRS-programmagids.", "de-DE" = "Videotextseiten aus Ihrem ErsatzRS-Programmführer erstellen.", "fr-FR" = "Créez des pages télétexte depuis votre guide ErsatzRS.", "it-IT" = "Crea pagine televideo dalla guida programmi ErsatzRS.", "pl" = "Twórz strony teletekstu z programu ErsatzRS.", "pt-BR" = "Crie páginas de teletexto com a programação do ErsatzRS.", "es-419" = "Crea páginas de teletexto con la programación de ErsatzRS.", "es-ES" = "Crea páginas de teletexto con la programación de ErsatzRS." }
+
+[[capabilities]]
+id = "addon.check.v1"
+
+[[capabilities]]
+id = "teletext.pages.v3"
+
+[entrypoints."linux-x64"]
+path = "addon.sh"
+kind = "posix_shell"
+
+[entrypoints."linux-arm64"]
+path = "addon.sh"
+kind = "posix_shell"
+
+[entrypoints."linux-arm"]
+path = "addon.sh"
+kind = "posix_shell"
+
+[entrypoints."osx-x64"]
+path = "addon.sh"
+kind = "posix_shell"
+
+[entrypoints."osx-arm64"]
+path = "addon.sh"
+kind = "posix_shell"
+
+[entrypoints."win-x64"]
+path = "addon.bat"
+kind = "windows_batch"
+
+[permissions]
+network_hosts = []
+media_read = false
+managed_ffmpeg = false
+external_commands = ["deno"]
+
+[[settings]]
+key = "PAGE_START"
+label = { "en-US" = "First output page", "nl" = "Eerste uitvoerpagina", "de-DE" = "Erste Ausgabeseite", "fr-FR" = "Première page de sortie", "it-IT" = "Prima pagina in uscita", "pl" = "Pierwsza strona wyjściowa", "pt-BR" = "Primeira página de saída", "es-419" = "Primera página de salida", "es-ES" = "Primera página de salida" }
+kind = "integer"
+required = false
+default = "200"
+options = []
+
+[[settings]]
+key = "PAGE_END"
+label = { "en-US" = "Last output page", "nl" = "Laatste uitvoerpagina", "de-DE" = "Letzte Ausgabeseite", "fr-FR" = "Dernière page de sortie", "it-IT" = "Ultima pagina in uscita", "pl" = "Ostatnia strona wyjściowa", "pt-BR" = "Última página de saída", "es-419" = "Última página de salida", "es-ES" = "Última página de salida" }
+kind = "integer"
+required = false
+default = "299"
+options = []
+
+[[settings]]
+key = "INDEX_PAGE"
+label = { "en-US" = "Index page", "nl" = "Indexpagina", "de-DE" = "Indexseite", "fr-FR" = "Page d’index", "it-IT" = "Pagina indice", "pl" = "Strona indeksu", "pt-BR" = "Página de índice", "es-419" = "Página de índice", "es-ES" = "Página de índice" }
+kind = "integer"
+required = false
+default = "200"
+options = []
+
+[[settings]]
+key = "THEME"
+label = { "en-US" = "Theme", "nl" = "Thema", "de-DE" = "Thema", "fr-FR" = "Thème", "it-IT" = "Tema", "pl" = "Motyw", "pt-BR" = "Tema", "es-419" = "Tema", "es-ES" = "Tema" }
+kind = "enum"
+required = false
+default = "classic"
+options = ["classic", "night", "contrast"]
+
+[[settings]]
+key = "ACCENT"
+label = { "en-US" = "Accent colour override", "nl" = "Accentkleur overschrijven", "de-DE" = "Akzentfarbe überschreiben", "fr-FR" = "Remplacer la couleur d’accent", "it-IT" = "Sostituzione colore principale", "pl" = "Zastąpienie koloru akcentu", "pt-BR" = "Substituição da cor de destaque", "es-419" = "Reemplazo del color de acento", "es-ES" = "Sustitución del color de acento" }
+kind = "enum"
+required = false
+default = "theme"
+options = ["theme", "red", "green", "yellow", "blue", "magenta", "cyan", "white"]
+
+[[settings]]
+key = "LAYOUT"
+label = { "en-US" = "Layout override", "nl" = "Indeling overschrijven", "de-DE" = "Layout überschreiben", "fr-FR" = "Remplacer la mise en page", "it-IT" = "Sostituzione disposizione", "pl" = "Zastąpienie układu", "pt-BR" = "Substituição do layout", "es-419" = "Reemplazo de diseño", "es-ES" = "Sustitución de diseño" }
+kind = "enum"
+required = false
+default = "theme"
+options = ["theme", "standard", "compact"]
+
+[[settings]]
+key = "HEADER"
+label = { "en-US" = "Header zone (up to 36 characters)", "nl" = "Kopzone (maximaal 36 tekens)", "de-DE" = "Kopfbereich (bis zu 36 Zeichen)", "fr-FR" = "Zone d’en-tête (36 caractères maximum)", "it-IT" = "Zona intestazione (massimo 36 caratteri)", "pl" = "Strefa nagłówka (do 36 znaków)", "pt-BR" = "Zona do cabeçalho (até 36 caracteres)", "es-419" = "Zona de encabezado (hasta 36 caracteres)", "es-ES" = "Zona de cabecera (hasta 36 caracteres)" }
+kind = "string"
+required = false
+default = "TV GUIDE"
+options = []
+
+[[settings]]
+key = "FOOTER"
+label = { "en-US" = "Footer zone (up to 36 characters)", "nl" = "Voetzone (maximaal 36 tekens)", "de-DE" = "Fußbereich (bis zu 36 Zeichen)", "fr-FR" = "Zone de pied de page (36 caractères maximum)", "it-IT" = "Zona piè di pagina (massimo 36 caratteri)", "pl" = "Strefa stopki (do 36 znaków)", "pt-BR" = "Zona do rodapé (até 36 caracteres)", "es-419" = "Zona de pie (hasta 36 caracteres)", "es-ES" = "Zona de pie (hasta 36 caracteres)" }
+kind = "string"
+required = false
+default = "Your TV guide"
+options = []

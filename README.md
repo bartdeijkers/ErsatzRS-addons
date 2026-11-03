@@ -10,7 +10,7 @@ remains an immutable host-managed copy until an operator confirms an update.
 
 ## Add-ons
 
-- [TV-guide teletext](addons/org.ersatzrs.addon.tvguide-teletext/README.md) (unreleased) creates
+- [TV-guide teletext](addons/org.ersatzrs.addon.tvguide-teletext/README.md) (0.1.2) creates
   profile-scoped teletext guides with page-range/index selection, themes and
   custom zones from the host's read-only programme context.
 - [yt-dlp](addons/org.ersatzrs.addon.yt-dlp/README.md) streams supported remote
@@ -18,10 +18,15 @@ remains an immutable host-managed copy until an operator confirms an update.
   individual videos as add-on lists.
 
 Beeld & Geluid is retired and unsupported by maintainer decision. Do not
-access that service for development or acceptance. Source bundles include yt-dlp and TV-guide teletext. The published v0.11.11
-bundle contains only yt-dlp; the new guide package requires this checkout or a
-locally built complete bundle until a new release is approved. Existing
-operator-managed installations and data are not automatically removed.
+access that service for development or acceptance. The v0.11.12 repository
+bundle contains TV-guide teletext 0.1.2 and yt-dlp 0.11.12. Repository release
+versions are independent of each add-on version; the older v0.11.11 bundle
+contains only yt-dlp.
+
+Before upgrading ErsatzRS to 1.2, import or refresh this repository and explicitly
+update the installed add-ons in **Settings > Add-ons**. These versions also retain
+their previous host compatibility. Repository refresh and application upgrade do
+not automatically replace installed packages or operator data.
 
 ## Documentation
 

@@ -4,22 +4,33 @@ All notable changes are recorded here using Keep a Changelog.
 
 ## [Unreleased]
 
-### Fixed
-
-- TV-guide teletext 0.1.1 runs the same producer on Linux ARMv7 through Node.js
-  22.18+, retaining Deno on Linux x64/ARM64 and Windows. Declare the required
-  ARMv7 `libatomic1` dependency, preserve exact pages/metadata and template
-  revision, and keep package installation/permission review explicit.
+## [0.11.12] - 2026-11-03
 
 ### Added
 
-- TV-guide teletext 0.1.0: generate complete host-supplied programme listings,
+- TV-guide teletext 0.1.2: generate complete host-supplied programme listings,
   Now/Next/Continuing/Later Today and index/subpage/colour-key navigation through
   the existing v3 contract. Named per-channel profiles choose output ranges,
   index pages, colour/layout themes and custom header/footer zones. Keep native
   template/theme/edit-boundary metadata, complete long Unicode titles and
   timezone/DST distinctions; reject invalid or oversized contributions without
   partial output. Installation and publication remain explicit host actions.
+
+### Changed
+
+- TV-guide teletext 0.1.2 and yt-dlp 0.11.12 support ErsatzRS 1.2 while
+  retaining their previous host ranges. Update installed add-ons before
+  upgrading the host; refreshing the repository alone does not update them.
+  Producer, provider and template behavior remain unchanged.
+- Use the published FFmpeg 2.0.9 archives for Windows/Linux test fixtures,
+  retaining their exact qualified bytes and historical embedded version labels.
+
+### Fixed
+
+- TV-guide teletext runs the same producer on Linux ARMv7 through Node.js
+  22.18+, retaining Deno on Linux x64/ARM64 and Windows. Declare the required
+  ARMv7 `libatomic1` dependency, preserve exact pages/metadata and template
+  revision, and keep package installation/permission review explicit.
 
 ## [0.11.11] - 2026-10-28
 
@@ -104,6 +115,7 @@ All notable changes are recorded here using Keep a Changelog.
   distinguish updated, already current, manual update required, and failed
   outcomes without exposing native diagnostic text.
 
-[Unreleased]: https://github.com/bartdeijkers/ErsatzRS-addons/compare/v0.11.11...HEAD
+[Unreleased]: https://github.com/bartdeijkers/ErsatzRS-addons/compare/v0.11.12...HEAD
+[0.11.12]: https://github.com/bartdeijkers/ErsatzRS-addons/compare/v0.11.11...v0.11.12
 [0.11.11]: https://github.com/bartdeijkers/ErsatzRS-addons/compare/v0.11.6...v0.11.11
 [0.11.6]: https://github.com/bartdeijkers/ErsatzRS-addons/releases/tag/v0.11.6

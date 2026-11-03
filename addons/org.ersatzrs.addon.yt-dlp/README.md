@@ -6,6 +6,10 @@ operator-installed yt-dlp. Always download or update to the
 before configuring the add-on. ErsatzRS supplies its managed FFmpeg runtime;
 yt-dlp is deliberately not bundled or updated automatically by the add-on.
 
+Package 0.11.12 supports ErsatzRS 1.2 while retaining the previous host range.
+Update the installed add-on before upgrading the host; refreshing the repository
+alone does not replace the installed package. Provider behavior is unchanged.
+
 Prepared downloads load only this package's local yt-dlp postprocessor plugin;
 they do not load default plugin directories or replace the installed executable.
 The plugin subclasses the stock chapter cutter: native yt-dlp still owns media

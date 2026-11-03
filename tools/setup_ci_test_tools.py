@@ -31,13 +31,13 @@ def main() -> None:
     download("https://github.com/yt-dlp/yt-dlp/releases/download/2026.08.19/yt-dlp", yt_dlp,
              "1fa6733c37ea6fb51c99ad8fe785e7b7e5f3246c9b980230329d4fb72ed8d4d6")
     if system == "Windows":
-        name = "ersatzrs-ffmpeg-2.0.0-win-x64.zip"
-        digest = "176c11d8aceb20eb05025609d91335e7b8d23861567b1099337d0579c19f479a"
+        name = "ersatzrs-ffmpeg-concat-clock-local-win-x64.zip"
+        digest = "6970a9dd90e763317c4fbe654d8f95f67c9acd66503c650e96497970379ae840"
     else:
-        name = "ersatzrs-ffmpeg-2.0.0-linux-x64.tar.gz"
-        digest = "b95a3afe004b542e482c60c99499fdb4441c0115778bcfa9dbf07a9f6b5ea7f7"
+        name = "ersatzrs-ffmpeg-concat-clock-local-linux-x64.tar.gz"
+        digest = "9a31e3da3672a5e4f8d5fa06ee7dd7424e946b72b3530a810dc8a176a044647e"
     archive_path = root / name
-    download(f"https://github.com/bartdeijkers/ErsatzRS-ffmpeg/releases/download/v2.0.0/{name}",
+    download(f"https://github.com/bartdeijkers/ErsatzRS-ffmpeg/releases/download/2.0.9/{name}",
              archive_path, digest)
     if system == "Windows":
         with zipfile.ZipFile(archive_path) as archive:

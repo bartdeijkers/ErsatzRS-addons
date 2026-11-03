@@ -49,8 +49,10 @@ Caption postprocessor tests additionally require the stock platform-independent
 yt-dlp zipimport executable and FFmpeg/ffprobe 9. Set `YT_DLP_TEST_ZIP` to that
 download (not the Windows PyInstaller `.exe`) and `FFMPEG_BIN`/`FFPROBE_BIN` to
 the media executables when they are not on PATH. CI provisions checksum-pinned
-yt-dlp 2026.08.19 and ErsatzRS-ffmpeg 2.0.0 in runner temporary storage through
-`tools/setup_ci_test_tools.py`; it does not update installed tools.
+yt-dlp 2026.08.19 and stable ErsatzRS-ffmpeg 2.0.9 in runner temporary storage through
+`tools/setup_ci_test_tools.py`; it does not update installed tools. The 2.0.9
+release retains its qualified `concat-clock-local` asset names and historical
+embedded version labels; the published archive and payload digests identify it.
 
 ## Verify native tool updates with synthetic executables
 

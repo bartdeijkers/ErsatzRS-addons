@@ -1,9 +1,9 @@
 manifest_version = 6
 id = "org.ersatzrs.addon.tvguide-teletext"
-version = "0.1.1"
+version = "0.1.2"
 license = "Zlib"
 source_url = "https://github.com/bartdeijkers/ErsatzRS-addons/tree/main/addons/org.ersatzrs.addon.tvguide-teletext"
-host_version = ">=1.1.0, <1.2.0"
+host_version = ">=1.1.0, <1.3.0"
 
 name = { "en-US" = "TV-guide teletext", "nl" = "TV-gids teletekst", "de-DE" = "TV-Guide-Videotext", "fr-FR" = "Télétexte du guide TV", "it-IT" = "Televideo guida TV", "pl" = "Teletekst programu TV", "pt-BR" = "Teletexto do guia de TV", "es-419" = "Teletexto de guía de TV", "es-ES" = "Teletexto de la guía de TV" }
 summary = { "en-US" = "Create teletext pages from your ErsatzRS programme guide.", "nl" = "Maak teletekstpagina’s van je ErsatzRS-programmagids.", "de-DE" = "Videotextseiten aus Ihrem ErsatzRS-Programmführer erstellen.", "fr-FR" = "Créez des pages télétexte depuis votre guide ErsatzRS.", "it-IT" = "Crea pagine televideo dalla guida programmi ErsatzRS.", "pl" = "Twórz strony teletekstu z programu ErsatzRS.", "pt-BR" = "Crie páginas de teletexto com a programação do ErsatzRS.", "es-419" = "Crea páginas de teletexto con la programación de ErsatzRS.", "es-ES" = "Crea páginas de teletexto con la programación de ErsatzRS." }

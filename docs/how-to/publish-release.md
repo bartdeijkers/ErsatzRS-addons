@@ -55,8 +55,16 @@ python3 -m zipfile -t dist/release/ErsatzRS-addons.zip
 ```
 
 Confirm the asset contains `repository.toml` and the complete `addons/` tree.
+For v0.11.12, inspect both manifest identities: TV-guide teletext 0.1.2 and
+yt-dlp 0.11.12, with host ranges accepting ErsatzRS 1.2. Repository and add-on
+versions are separate. Record the exact tag commit, all applicable validation
+and publication job results, and the downloaded ZIP digest. Compare its member
+bytes and executable modes with the release source and its ZIP digest with
+the uploaded workflow artifact; older releases do not prove the new package.
+
 If the workflow is rerun for the same release, its attachment step replaces the
-asset with the newly validated workflow artifact.
+asset with the newly validated workflow artifact. Recheck the downloaded bytes
+after the last attachment.
 
 ## Build without publishing a release
 

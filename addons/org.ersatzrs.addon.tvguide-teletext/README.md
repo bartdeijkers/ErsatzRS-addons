@@ -1,6 +1,6 @@
 # TV-guide teletext
 
-A local, network-free `teletext.pages.v3` producer for ErsatzRS 1.1.x with the
+A local, network-free `teletext.pages.v3` producer for ErsatzRS 1.1.x and 1.2.x with the
 accepted Phase 9A v3 host contract. Explicit installation/enabling is required.
 Linux x64, Linux ARM64 and Windows use Deno 2. Linux ARMv7 uses Node.js 22.18 or
 newer because Deno has no official ARMv7 binary. Debian-family ARMv7 systems
@@ -60,3 +60,7 @@ The manifest chooses the appropriate entrypoint per RID. The same source was
 qualified with Deno 2.9.5/2.9.8 and Node 22.21.1/22.23.4. ARM software checks use
 emulation; native ARM remains deferred, not verified. Version 0.1.1 changes the
 runtime boundary, not template revision 1 or the page/metadata contract.
+
+Version 0.1.2 extends host compatibility to ErsatzRS 1.2 without changing the
+producer or template revision. Update the installed add-on before upgrading
+the host; a repository refresh alone does not replace the installed package.

@@ -1,8 +1,7 @@
 # Official ErsatzRS add-ons
 
 This private repository contains the add-ons maintained for ErsatzRS. Operators
-acquire it themselves as a Git checkout or a complete offline ZIP; ErsatzRS
-does not receive Git credentials or contact a repository catalog.
+acquire it themselves as a Git checkout or a complete offline ZIP.
 
 Installing the repository discovers add-on offers. Each add-on is installed
 and updated separately in **Settings > Add-ons**, and the running installation
@@ -16,17 +15,6 @@ remains an immutable host-managed copy until an operator confirms an update.
 - [yt-dlp](addons/org.ersatzrs.addon.yt-dlp/README.md) streams supported remote
   media through an operator-installed yt-dlp and imports public playlists or
   individual videos as add-on lists.
-
-Beeld & Geluid is retired and unsupported by maintainer decision. Do not
-access that service for development or acceptance. The v0.11.12 repository
-bundle contains TV-guide teletext 0.1.2 and yt-dlp 0.11.12. Repository release
-versions are independent of each add-on version; the older v0.11.11 bundle
-contains only yt-dlp.
-
-Before upgrading ErsatzRS to 1.2, import or refresh this repository and explicitly
-update the installed add-ons in **Settings > Add-ons**. These versions also retain
-their previous host compatibility. Repository refresh and application upgrade do
-not automatically replace installed packages or operator data.
 
 ## Documentation
 

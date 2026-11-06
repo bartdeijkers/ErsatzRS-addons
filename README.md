@@ -1,6 +1,6 @@
 # Official ErsatzRS add-ons
 
-This private repository contains the add-ons maintained for ErsatzRS. Operators
+This repository contains the add-ons maintained for ErsatzRS. Operators
 acquire it themselves as a Git checkout or a complete offline ZIP.
 
 Installing the repository discovers add-on offers. Each add-on is installed

@@ -4,6 +4,15 @@ All notable changes are recorded here using Keep a Changelog.
 
 ## [Unreleased]
 
+### Added
+
+- Internet Archive 0.1.0: import public archive.org items, collections and
+  searches as add-on lists, with one entry per uploaded video, mapped
+  metadata, automatic `archive.org` source selection, and unavailable markers
+  for withdrawn or lending-restricted items. Programmes stream from archive.org
+  through the managed FFmpeg runtime without re-encoding and support seeking.
+  Requires Deno, or Node.js 22.18+ on Linux ARMv7.
+
 ## [0.11.12] - 2026-11-03
 
 ### Added

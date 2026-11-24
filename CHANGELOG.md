@@ -11,7 +11,17 @@ All notable changes are recorded here using Keep a Changelog.
   metadata, automatic `archive.org` source selection, and unavailable markers
   for withdrawn or lending-restricted items. Programmes stream from archive.org
   through the managed FFmpeg runtime without re-encoding and support seeking.
-  Requires Deno, or Node.js 22.18+ on Linux ARMv7.
+  Supports ErsatzRS 1.2 and 1.3. Requires Deno, or Node.js 22.18+ on
+  Linux ARMv7.
+
+## [0.11.13] - 2026-11-24
+
+### Changed
+
+- TV-guide teletext 0.1.3 and yt-dlp 0.11.13 support ErsatzRS 1.3 while
+  retaining their previous host ranges. Update installed add-ons before
+  upgrading the host; refreshing the repository alone does not update them.
+  Producer, provider and template behavior remain unchanged.
 
 ## [0.11.12] - 2026-11-03
 
@@ -124,7 +134,8 @@ All notable changes are recorded here using Keep a Changelog.
   distinguish updated, already current, manual update required, and failed
   outcomes without exposing native diagnostic text.
 
-[Unreleased]: https://github.com/bartdeijkers/ErsatzRS-addons/compare/v0.11.12...HEAD
+[Unreleased]: https://github.com/bartdeijkers/ErsatzRS-addons/compare/v0.11.13...HEAD
+[0.11.13]: https://github.com/bartdeijkers/ErsatzRS-addons/compare/v0.11.12...v0.11.13
 [0.11.12]: https://github.com/bartdeijkers/ErsatzRS-addons/compare/v0.11.11...v0.11.12
 [0.11.11]: https://github.com/bartdeijkers/ErsatzRS-addons/compare/v0.11.6...v0.11.11
 [0.11.6]: https://github.com/bartdeijkers/ErsatzRS-addons/releases/tag/v0.11.6

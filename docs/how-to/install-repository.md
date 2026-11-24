@@ -1,7 +1,8 @@
 # Install or update the add-on repository
 
-For ErsatzRS 1.2, use TV-guide teletext 0.1.2 and yt-dlp 0.11.12 or newer.
-Repository release v0.11.12 contains both packages. Update the installed add-ons
+For ErsatzRS 1.3, use TV-guide teletext 0.1.3 and yt-dlp 0.11.13 or newer.
+Repository release v0.11.13 contains both packages. For ErsatzRS 1.2, use
+TV-guide teletext 0.1.2 and yt-dlp 0.11.12 or newer (repository v0.11.12). Update the installed add-ons
 in **Settings > Add-ons** before upgrading the host; these versions also work
 with their previously supported hosts. Repository refresh alone does not update
 the installed copies.

@@ -12,6 +12,9 @@ remains an immutable host-managed copy until an operator confirms an update.
 - [TV-guide teletext](addons/org.ersatzrs.addon.tvguide-teletext/README.md) (0.1.4) creates
   profile-scoped teletext guides with page-range/index selection, themes and
   custom zones from the host's read-only programme context.
+- [Internet Archive](addons/org.ersatzrs.addon.internet-archive/README.md) (0.1.0)
+  imports public archive.org items, collections and searches as add-on lists
+  and streams them through the managed FFmpeg runtime.
 - [yt-dlp](addons/org.ersatzrs.addon.yt-dlp/README.md) streams supported remote
   media through an operator-installed yt-dlp and imports public playlists or
   individual videos as add-on lists.

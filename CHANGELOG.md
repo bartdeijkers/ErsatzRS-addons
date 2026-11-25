@@ -6,10 +6,16 @@ All notable changes are recorded here using Keep a Changelog.
 
 ### Added
 
+- Internet Archive 0.1.0: import public archive.org items, collections and
+  searches as add-on lists, with one entry per uploaded video, mapped
+  metadata, automatic `archive.org` source selection, and unavailable markers
+  for withdrawn or lending-restricted items. Programmes stream from archive.org
+  through the managed FFmpeg runtime without re-encoding and support seeking.
+  Supports ErsatzRS 1.2 and 1.3. Requires Deno, or Node.js 22.18+ on
+  Linux ARMv7.
 - TV-guide teletext 0.1.4 accepts channel page assignments from the Atlas
   editor, including source overrides, subpages, colour keys and a shared banner.
   Its broadcast index includes assigned library pages in page-number order.
-
 
 ## [0.11.13] - 2026-11-24
 

@@ -9,7 +9,7 @@ remains an immutable host-managed copy until an operator confirms an update.
 
 ## Add-ons
 
-- [TV-guide teletext](addons/org.ersatzrs.addon.tvguide-teletext/README.md) (0.1.3) creates
+- [TV-guide teletext](addons/org.ersatzrs.addon.tvguide-teletext/README.md) (0.1.4) creates
   profile-scoped teletext guides with page-range/index selection, themes and
   custom zones from the host's read-only programme context.
 - [yt-dlp](addons/org.ersatzrs.addon.yt-dlp/README.md) streams supported remote

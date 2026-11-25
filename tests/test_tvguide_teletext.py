@@ -233,6 +233,73 @@ class TvGuideTeletextTests(unittest.TestCase):
         bad = request(); bad["channels"][0]["context"]["later_today"] *= 10000
         self.reject("invalid-guide-reference", bad)
 
+    def test_atlas_numbers_sources_subpages_colours_theme_and_cycle(self):
+        guide = request()
+        second = copy.deepcopy(guide["channels"][0])
+        second.update(id=2, number="2", name="Channel Two")
+        guide["channels"].append(second)
+        layout = [{"page": 215, "title": "Index", "links": {"blue": 221, "green": None, "red": 310},
+                   "theme": {"banner": "ATLAS", "accent": "red", "heading": "green"}},
+                  {"page": 221, "source": "2", "title": "Guide",
+                   "interval": 17, "subpages": [{"part": 1}, {"part": 1, "source": "1", "title": "Late"}]}]
+        guide["page_layout"] = json.dumps(layout)
+        output = self.produce(guide)
+        pages = output["service"]["pages"]
+        self.assertEqual([(p["address"]["page"], p["address"]["subcode"]) for p in pages],
+                         [(215, 0), (221, 0), (221, 1)])
+        self.assertEqual(output["service"]["initial_page"], 215)
+        links = {n["role"]: n["target"]["page"] for n in pages[0]["navigation"]}
+        self.assertEqual(output["authoring"]["pages"][0]["channel_links"], {"red": 310})
+        self.assertNotIn("red", links)
+        self.assertEqual(links["cyan"], 221)
+        self.assertNotIn("green", links)
+        self.assertIn("ATLAS", json.dumps(pages[0]["rows"]))
+        self.assertIn("Late", json.dumps(pages[2]["rows"]))
+        self.assertEqual(output["authoring"]["pages"][1]["cycle_seconds"], 17)
+        self.assertNotIn("cycle_seconds", output["authoring"]["pages"][2])
+
+    def test_atlas_index_lists_library_destinations_without_owning_their_pages(self):
+        guide = request()
+        extras = [{"page": n, "title": f"Station {n}"} for n in range(316, 308, -1)]
+        guide["page_layout"] = json.dumps([{"page": 200, "index_entries": extras}, {"page": 322, "source": "1"}])
+        pages = self.produce(guide)["service"]["pages"]
+        index = [p for p in pages if p["address"]["page"] == 200]
+        self.assertEqual(len(index), 2)
+        lines = [[run["content"]["text"] for row in p["rows"] for run in row["runs"]] for p in index]
+        self.assertEqual([line for line in lines[0] if "Station" in line],
+                         [f"{n} Station {n}" for n in range(309, 317)])
+        self.assertTrue(any(line.startswith("322 ") for line in lines[1]))
+        self.assertEqual({p["address"]["page"] for p in pages}, {200, 322})
+        extras[0]["page"] = 322
+        guide["page_layout"] = json.dumps([{"page": 200, "index_entries": extras}, {"page": 322, "source": "1"}])
+        self.reject("invalid-page-map", guide)
+
+    def test_atlas_range_uses_the_supplied_local_timezone(self):
+        guide = request()
+        guide["timezone"] = "Europe/Amsterdam"
+        for item, start, stop, title in zip(guide["channels"][0]["programmes"], (17, 21), (18, 22), ("Early", "Late")):
+            item.update(start=f"2026-11-25T{start}:00:00Z", stop=f"2026-11-25T{stop}:00:00Z", title=title, custom_title=None)
+        guide["page_layout"] = json.dumps([{"page": 200}, {"page": 201, "source": "1", "range": "early",
+                                            "subpages": [{"part": 1}, {"part": 1, "range": "late"}]}])
+        pages = self.produce(guide)["service"]["pages"]
+        self.assertIn("Early", json.dumps(pages[1]["rows"]))
+        self.assertNotIn("Late", json.dumps(pages[1]["rows"]))
+        self.assertIn("Late", json.dumps(pages[2]["rows"]))
+        self.assertNotIn("Early", json.dumps(pages[2]["rows"]))
+
+    def test_atlas_rejects_invalid_whole_edition(self):
+        for extra in ({"interval": 0}, {"interval": 601}, {"links": {"red": 900}},
+                      {"theme": {"banner": "test", "accent": "x", "heading": "red"}}):
+            guide = request()
+            guide["page_layout"] = json.dumps([{"page": 200, **extra}])
+            self.reject("invalid-page-map", guide)
+
+    def test_channel_assignment_can_move_outside_automatic_profile_range(self):
+        guide = request()
+        guide["page_layout"] = json.dumps([{"page": 199}, {"page": 899, "source": "1"}])
+        pages = self.produce(guide)["service"]["pages"]
+        self.assertEqual({p["address"]["page"] for p in pages}, {199, 899})
+
     def test_manifest_labels_and_permissions(self):
         manifest = tomllib.loads((PACKAGE / "addon.toml").read_text())
         self.assertEqual(manifest["id"], PACKAGE.name)

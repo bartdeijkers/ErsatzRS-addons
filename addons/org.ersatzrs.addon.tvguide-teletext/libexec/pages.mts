@@ -41,6 +41,7 @@ type Channel = {
   };
 };
 type Request = {
+  page_layout?: string;
   schema_version: number;
   generation: string;
   locale: string;
@@ -58,7 +59,151 @@ type Settings = {
   layout: string;
   header: string;
   footer: string;
+  pageMap: AtlasPage[];
 };
+const KEYS = ["red", "green", "yellow", "blue"] as const;
+type AtlasKey = typeof KEYS[number];
+type Range = "evening" | "early" | "late" | "all";
+type AtlasPage = {
+  range?: Range;
+  page: number;
+  source?: string;
+  title?: string;
+  interval?: number;
+  index_entries?: { page: number; title: string }[];
+  theme?: { banner: string; accent: string; heading: string };
+  links?: Partial<Record<AtlasKey, number | null>>;
+  subpages?: { title?: string; source?: string; range?: Range; part: number }[];
+};
+
+function parsePageMap(
+  raw: string,
+  first: number,
+  last: number,
+  index: number | undefined,
+): AtlasPage[] {
+  if (!raw) return [];
+  const invalid = () =>
+    reject(
+      "invalid-page-map",
+      "Check the channel page numbers, sources and colour destinations.",
+    );
+  if (new TextEncoder().encode(raw).length > 16384) invalid();
+  let entries: unknown;
+  try {
+    entries = JSON.parse(raw);
+  } catch {
+    return invalid();
+  }
+  if (
+    !Array.isArray(entries) || !entries.length ||
+    entries.length > last - first + 1
+  ) return invalid();
+  const numbers = new Set<number>();
+  const titleOK = (v: unknown) =>
+    v === undefined ||
+    typeof v === "string" && v.trim() && Array.from(v).length <= 34 &&
+      !hasControl(v);
+  const sourceOK = (v: unknown) =>
+    typeof v === "string" && /^[1-9][0-9]{0,18}$/.test(v);
+  const rangeOK = (value: unknown) =>
+    value === undefined ||
+    ["early", "evening", "late", "all"].includes(String(value));
+  for (const entry of entries) {
+    if (
+      !entry || typeof entry !== "object" || Array.isArray(entry) ||
+      Object.keys(entry).some((k) =>
+        ![
+          "page",
+          "source",
+          "range",
+          "title",
+          "links",
+          "subpages",
+          "interval",
+          "index_entries",
+          "theme",
+        ]
+          .includes(
+            k,
+          )
+      ) ||
+      !Number.isInteger(entry.page) || entry.page < first ||
+      entry.page > last || numbers.has(entry.page) ||
+      (entry.source !== undefined && !sourceOK(entry.source)) ||
+      (entry.interval !== undefined &&
+        (!Number.isInteger(entry.interval) || entry.interval < 1 ||
+          entry.interval > 600)) ||
+      !rangeOK(entry.range) ||
+      (entry.range !== undefined && entry.source === undefined) ||
+      !titleOK(entry.title)
+    ) return invalid();
+    if (entry.theme !== undefined) {
+      const t = entry.theme;
+      if (
+        entry.source !== undefined || !t || typeof t !== "object" ||
+        Object.keys(t).some((k) =>
+          !["banner", "accent", "heading"].includes(k)
+        ) ||
+        typeof t.banner !== "string" || !t.banner.trim() ||
+        Array.from(t.banner).length > WIDTH || hasControl(t.banner) ||
+        ![t.accent, t.heading].every((c) =>
+          COLOURS.includes(c) && c !== "black"
+        )
+      ) return invalid();
+    }
+    numbers.add(entry.page);
+    if (
+      entry.links !== undefined &&
+      (!entry.links || typeof entry.links !== "object" ||
+        Array.isArray(entry.links) ||
+        Object.entries(entry.links).some(([k, v]) =>
+          !KEYS.includes(k as AtlasKey) ||
+          (v !== null &&
+            (typeof v !== "number" || !Number.isInteger(v) || v < 100 ||
+              v > 899))
+        ))
+    ) return invalid();
+    if (
+      entry.subpages !== undefined &&
+      (!Array.isArray(entry.subpages) || !entry.subpages.length ||
+        entry.subpages.length > 64 ||
+        entry.subpages.some((
+          p: { title?: string; source?: string; range?: Range; part: number },
+        ) =>
+          !p || typeof p !== "object" || Object.keys(p).some((k) =>
+            !["title", "source", "range", "part"].includes(k)
+          ) ||
+          !Number.isInteger(p.part) || p.part < 1 || p.part > MAX_PAGES ||
+          !rangeOK(p.range) ||
+          (p.range !== undefined && entry.source === undefined) ||
+          !titleOK(p.title) ||
+          (p.source !== undefined &&
+            (entry.source === undefined || !sourceOK(p.source)))
+        ))
+    ) return invalid();
+  }
+  const indices = entries.filter((p) => p.source === undefined);
+  if (
+    indices.length !== 1 || (index !== undefined && indices[0].page !== index)
+  ) return invalid();
+  for (const entry of entries) {
+    if (entry.index_entries === undefined) continue;
+    if (entry !== indices[0] || !Array.isArray(entry.index_entries)) {
+      return invalid();
+    }
+    for (const dest of entry.index_entries) {
+      if (
+        !dest || Object.keys(dest).some((k) => k !== "page" && k !== "title") ||
+        !Number.isInteger(dest.page) || dest.page < 100 || dest.page > 899 ||
+        numbers.has(dest.page) || typeof dest.title !== "string" ||
+        hasControl(dest.title)
+      ) return invalid();
+      numbers.add(dest.page);
+    }
+  }
+  return (entries as AtlasPage[]).sort((a, b) => a.page - b.page);
+}
 type Address = { page: number; subcode: number };
 type Row = ReturnType<typeof row>;
 type Draft = {
@@ -147,7 +292,17 @@ export function settings(env: Record<string, string>): Settings {
       );
     }
   }
-  return { first, last, index, theme, accent, layout, header, footer };
+  return {
+    first,
+    last,
+    index,
+    theme,
+    accent,
+    layout,
+    header,
+    footer,
+    pageMap: parsePageMap(env.PAGE_MAP ?? "", first, last, index),
+  };
 }
 function hasControl(value: string): boolean {
   return Array.from(value).some((character) => {
@@ -276,6 +431,20 @@ function parseRequest(source: string): Request {
 }
 
 export function generate(request: Request, config: Settings) {
+  if (request.page_layout !== undefined) {
+    if (typeof request.page_layout !== "string") {
+      reject("invalid-page-map", "Expected channel page assignments.");
+    }
+    const pageMap = parsePageMap(
+      request.page_layout,
+      100,
+      899,
+      undefined,
+    );
+    const index = pageMap.find((p) => p.source === undefined);
+    if (!index) reject("invalid-page-map", "Select an index page.");
+    config = { ...config, pageMap, index: index.page };
+  }
   if (
     request.schema_version !== 3 || typeof request.generation !== "string" ||
     !request.generation ||
@@ -286,6 +455,10 @@ export function generate(request: Request, config: Settings) {
       "invalid-guide-request",
       "A bounded teletext.pages.v3 request is required.",
     );
+  }
+  const shared = config.pageMap.find((p) => p.page === config.index)?.theme;
+  if (shared) {
+    config = { ...config, header: shared.banner, accent: shared.accent };
   }
   const lang = language(request.locale);
   let date: Intl.DateTimeFormat, clock: Intl.DateTimeFormat;
@@ -322,7 +495,7 @@ export function generate(request: Request, config: Settings) {
     { length: config.last - config.first + 1 },
     (_, i) => config.first + i,
   ).filter((p) => p !== config.index);
-  if (request.channels.length > available.length) {
+  if (!config.pageMap.length && request.channels.length > available.length) {
     reject(
       "guide-capacity",
       "The configured range needs an index and one page per guide channel.",
@@ -330,13 +503,13 @@ export function generate(request: Request, config: Settings) {
   }
   const firstRow = config.layout === "compact" ? 4 : 5,
     lineCount = 20 - firstRow;
-  const drafts: Draft[] = [],
-    indexLines = [
-      "CHANNELS",
-      ...request.channels.flatMap((channel, i) =>
-        wrap(`${available[i]} ${channel.number} ${text(channel.name)}`)
-      ),
-    ];
+  let drafts: Draft[] = [];
+  const indexLines = [
+    "CHANNELS",
+    ...request.channels.flatMap((channel, i) =>
+      wrap(`${available[i]} ${channel.number} ${text(channel.name)}`)
+    ),
+  ];
   if (!request.channels.length) indexLines.push("No guide channels");
   function append(
     page: number,
@@ -451,11 +624,151 @@ export function generate(request: Request, config: Settings) {
     }
     if (!channel.programmes.length) lines.push("No listed programmes");
     append(
-      available[i],
+      available[i] ?? config.index,
       `${channel.number} ${text(channel.name)}`,
       lines,
       `guide.channel-${channel.id}`,
     );
+  }
+  if (config.pageMap.length) {
+    const sources = new Map(
+      request.channels.map((channel) => [String(channel.id), channel]),
+    );
+    const generated = drafts;
+    drafts = [];
+    const channelPages = config.pageMap.filter((p) => p.source !== undefined);
+    const indexPage = config.pageMap.find((p) => p.page === config.index)!;
+    const destinations = channelPages.map((p) => {
+      const channel = sources.get(p.source!);
+      if (!channel) {
+        return reject(
+          "invalid-guide-reference",
+          "The configured guide source was not supplied.",
+        );
+      }
+      return { page: p.page, title: p.title ?? channel.name };
+    }).concat(indexPage.index_entries ?? []).sort((a, b) => a.page - b.page);
+    for (let i = 0; i < Math.max(1, destinations.length); i += 8) {
+      const lines = [
+        "CHANNELS",
+        ...destinations.slice(i, i + 8).map((p) =>
+          Array.from(p.page + " " + p.title).slice(0, WIDTH).join("")
+        ),
+      ];
+      drafts.push({
+        address: { page: config.index, subcode: subcode(drafts.length) },
+        title: indexPage.title ?? "TV GUIDE INDEX",
+        lines,
+        binding: "guide.index",
+      });
+    }
+    const indexSheets = drafts.slice();
+    drafts = [];
+    const byRange = new Map<string, Draft[]>();
+    const sheetsFor = (source?: string, range: Range = "all"): Draft[] => {
+      if (source === undefined) return indexSheets;
+      const binding = "guide.channel-" + source;
+      if (range === "all") {
+        return generated.filter((d) => d.binding === binding);
+      }
+      const key = source + "/" + range;
+      const prior = byRange.get(key);
+      if (prior) return prior;
+      const channel = sources.get(source);
+      if (!channel) return [];
+      const lines: string[] = [];
+      let day = "";
+      for (
+        const item of channel.programmes.toSorted((a, b) =>
+          instant(a.start).getTime() - instant(b.start).getTime()
+        )
+      ) {
+        const start = instant(item.start);
+        const hour = Number(
+          clock.formatToParts(start).find((p) => p.type === "hour")?.value,
+        );
+        if (
+          hour < (range === "late" ? 21 : 18) ||
+          (range === "early" && hour >= 21)
+        ) continue;
+        const localDay = date.format(start);
+        if (localDay !== day) {
+          day = localDay;
+          lines.push(...wrap(day));
+        }
+        lines.push(
+          ...wrap(
+            clock.format(start) + " " + (item.custom_title ?? item.title),
+          ),
+        );
+        if (item.sub_title) lines.push(...wrap(item.sub_title));
+      }
+      if (!lines.length) lines.push("No listed programmes");
+      const title = wrap(channel.number + " " + text(channel.name));
+      lines.unshift(...title.slice(1));
+      const sheets = Array.from(
+        { length: Math.ceil(lines.length / lineCount) },
+        (_, i) => ({
+          title: title[0],
+          binding,
+          address: { page: config.index, subcode: subcode(i) },
+          lines: lines.slice(i * lineCount, (i + 1) * lineCount),
+        }),
+      );
+      byRange.set(key, sheets);
+      return sheets;
+    };
+    for (const entry of config.pageMap) {
+      const original = sheetsFor(entry.source, entry.range);
+      if (!original.length) {
+        reject(
+          "invalid-guide-reference",
+          "The configured guide source was not supplied.",
+        );
+      }
+      const sheets = entry.subpages
+        ? entry.subpages.flatMap((sheet) => {
+          const source = sheetsFor(
+            sheet.source ?? entry.source,
+            sheet.range ?? entry.range,
+          )[sheet.part - 1];
+          if (!source && entry.page === config.index) return [];
+          if (!source) {
+            return reject(
+              "invalid-guide-reference",
+              "The configured subpage was not supplied.",
+            );
+          }
+          return {
+            ...source,
+            title: sheet.title ?? entry.title ?? source.title,
+          };
+        })
+        : original.map((sheet) => ({
+          ...sheet,
+          title: entry.title ?? sheet.title,
+        }));
+      if (entry.page === config.index && entry.subpages) {
+        // Required continuation sheets follow the number of current destinations.
+        for (const [part, sheet] of indexSheets.entries()) {
+          if (!entry.subpages.some((s) => s.part === part + 1)) {
+            sheets.push(sheet);
+          }
+        }
+      }
+      for (const [i, sheet] of sheets.entries()) {
+        if (drafts.length >= MAX_PAGES) {
+          reject(
+            "guide-capacity",
+            "The complete guide exceeds subpage capacity.",
+          );
+        }
+        drafts.push({
+          ...sheet,
+          address: { page: entry.page, subcode: subcode(i) },
+        });
+      }
+    }
   }
   // Six regions plus two bindings per page; preserve the host aggregate bound.
   if (drafts.length * 8 > 4096) {
@@ -464,11 +777,24 @@ export function generate(request: Request, config: Settings) {
       "The complete guide exceeds authoring metadata capacity.",
     );
   }
+  const ownedPages = new Set(drafts.map((draft) => draft.address.page));
+  const assignments = new Map(
+    config.pageMap.map((entry) => [entry.page, entry]),
+  );
+  const multiple = new Set(
+    drafts.filter((d) => d.address.subcode !== 0).map((d) => d.address.page),
+  );
+  const foreign = new Map(config.pageMap.map((entry) => [
+    entry.page,
+    Object.entries(entry.links ?? {}).filter(([, target]) =>
+      target != null && !ownedPages.has(target)
+    ),
+  ]));
   const pages = drafts.map((draft, i) => {
     const previous = drafts[(i + drafts.length - 1) % drafts.length].address;
     const next = drafts[(i + 1) % drafts.length].address;
     const index = { page: config.index, subcode: 0 };
-    const links = [
+    const automatic = [
       { role: "index", target: index },
       { role: "red", target: previous },
       { role: "green", target: next },
@@ -476,7 +802,18 @@ export function generate(request: Request, config: Settings) {
       { role: "cyan", target: index },
     ];
     const footer: Row = { row: 24, runs: [] };
-    for (const [n, link] of links.slice(1).entries()) {
+    const links = [automatic[0]];
+    const destinations = assignments.get(draft.address.page)?.links;
+    for (const [n, key] of KEYS.entries()) {
+      const target = destinations?.[key];
+      if (target === null) continue;
+      const link = target === undefined
+        ? automatic[n + 1]
+        : { role: automatic[n + 1].role, target: { page: target, subcode: 0 } };
+      // A foreign producer is authenticated later when the host composes the channel.
+      if (
+        target === undefined || ownedPages.has(target)
+      ) links.push(link);
       footer.runs.push(
         row(
           24,
@@ -493,7 +830,7 @@ export function generate(request: Request, config: Settings) {
       national_option: 0,
       rows: [
         row(1, config.header, config.accent),
-        row(3, draft.title, config.accent),
+        row(3, draft.title, shared?.heading ?? config.accent),
         ...draft.lines.map((line, n) => row(firstRow + n, line)),
         row(21, " ".repeat(WIDTH)),
         row(22, config.footer, config.accent),
@@ -504,6 +841,16 @@ export function generate(request: Request, config: Settings) {
   });
   const authoringPages = drafts.map((draft) => ({
     page: draft.address,
+    ...(request.page_layout && foreign.get(draft.address.page)?.length
+      ? { channel_links: Object.fromEntries(foreign.get(draft.address.page)!) }
+      : {}),
+    ...(request.page_layout && draft.address.subcode === 0 &&
+        multiple.has(draft.address.page)
+      ? {
+        cycle_seconds: assignments.get(draft.address.page)?.interval ??
+          10,
+      }
+      : {}),
     regions: [
       { id: "header", kind: "zone", row: 1, height: 1 },
       { id: "title", kind: "generated", row: 3, height: 1 },
@@ -605,6 +952,7 @@ if (import.meta.main) {
       const env: Record<string, string> = {};
       for (
         const key of [
+          "PAGE_MAP",
           "PAGE_START",
           "PAGE_END",
           "INDEX_PAGE",

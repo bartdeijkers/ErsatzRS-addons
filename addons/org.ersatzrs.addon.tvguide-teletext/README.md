@@ -23,6 +23,17 @@ use the supplied IANA timezone and include the UTC offset to distinguish DST
 folds. Filler gaps are not invented as named programmes; a missing context is
 shown as no listed programme.
 
+On an Atlas-capable host, enable the TV guide in the channel's Sources tab.
+Choose Guide index or Programme guide and assign any free page from 100 through 899. Each programme guide
+can select its own channel and time range. The evening ranges start at 18:00
+and 21:00 in the supplied guide timezone. A subpage can inherit or override
+its source and range. Assign a colour key to any active channel page, or turn
+the key off. A page with multiple subpages accepts an interval of 1–600 seconds.
+
+Teletext elements contains the shared guide banner and colour settings.
+Saving a channel captures its layout and current theme for subsequent guide
+refreshes. Hosts that omit the optional page layout use the profile defaults.
+
 `THEME` selects `classic` (yellow, standard layout), `night` (cyan, compact) or
 `contrast` (white, standard). `ACCENT` and `LAYOUT` permit explicit overrides;
 `theme` retains the theme default. Colour uses the base palette. These are
@@ -38,7 +49,7 @@ identities and dynamic bindings. Import remains a draft; explicit host publicati
 is separate. Template changes require an explicit package version update.
 
 Red navigates to the previous page/subpage, green to the next, yellow to the
-current channel's first subpage and cyan to the index. Every target belongs to
+current channel's first subpage and cyan to the index. Every automatic target belongs to
 the generated map. Invalid settings, missing context references, insufficient
 range/subpage/record/metadata capacity or oversized input/output fail before any
 response is emitted. The host independently validates complete output and owns

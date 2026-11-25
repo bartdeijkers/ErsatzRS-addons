@@ -13,6 +13,9 @@ All notable changes are recorded here using Keep a Changelog.
   through the managed FFmpeg runtime without re-encoding and support seeking.
   Supports ErsatzRS 1.2 and 1.3. Requires Deno, or Node.js 22.18+ on
   Linux ARMv7.
+- TV-guide teletext 0.1.4 accepts channel page assignments from the Atlas
+  editor, including source overrides, subpages, colour keys and a shared banner.
+  Its broadcast index includes assigned library pages in page-number order.
 
 ## [0.11.13] - 2026-11-24
 

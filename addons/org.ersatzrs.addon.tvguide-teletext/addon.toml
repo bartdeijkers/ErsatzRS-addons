@@ -1,6 +1,6 @@
 manifest_version = 6
 id = "org.ersatzrs.addon.tvguide-teletext"
-version = "0.1.4"
+version = "0.1.6"
 license = "Zlib"
 source_url = "https://github.com/bartdeijkers/ErsatzRS-addons/tree/main/addons/org.ersatzrs.addon.tvguide-teletext"
 host_version = ">=1.1.0, <1.5.0"
@@ -112,6 +112,20 @@ options = []
 [[settings]]
 key = "PAGE_MAP"
 label = { "en-US" = "Channel page assignments", "nl" = "Paginatoewijzingen voor dit kanaal", "de-DE" = "Seitenzuordnung des Kanals", "fr-FR" = "Pages de la chaîne", "it-IT" = "Pagine del canale", "pl" = "Strony kanału", "pt-BR" = "Páginas do canal", "es-419" = "Páginas del canal", "es-ES" = "Páginas del canal" }
+kind = "string"
+required = false
+options = []
+
+[[settings]]
+key = "EDITION_LAYOUT"
+label = { "en-US" = "Episode page design (JSON)", "nl" = "Ontwerp afleveringspagina’s (JSON)", "de-DE" = "Episodenseiten-Layout (JSON)", "fr-FR" = "Disposition des pages épisodes (JSON)", "it-IT" = "Layout pagine episodi (JSON)", "pl" = "Układ stron odcinków (JSON)", "pt-BR" = "Layout das páginas de episódios (JSON)", "es-419" = "Diseño de páginas de episodios (JSON)", "es-ES" = "Diseño de páginas de episodios (JSON)" }
+kind = "string"
+required = false
+options = []
+
+[[settings]]
+key = "EPISODE_DATA"
+label = { "en-US" = "Episode catalogue (JSON)", "nl" = "Afleveringscatalogus (JSON)", "de-DE" = "Episodenkatalog (JSON)", "fr-FR" = "Catalogue des épisodes (JSON)", "it-IT" = "Catalogo episodi (JSON)", "pl" = "Katalog odcinków (JSON)", "pt-BR" = "Catálogo de episódios (JSON)", "es-419" = "Catálogo de episodios (JSON)", "es-ES" = "Catálogo de episodios (JSON)" }
 kind = "string"
 required = false
 options = []

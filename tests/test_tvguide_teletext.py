@@ -112,6 +112,37 @@ class TvGuideTeletextTests(unittest.TestCase):
         self.assertEqual(service["mot_selections"],
                          [{"display": page["address"], "mot": None} for page in service["pages"]])
 
+    def test_episode_cards_and_atlas_directory_share_one_service(self):
+        guide = request()
+        atlas = [{"page": 202, "interval": 7}, {"page": 201, "source": "1"}]
+        guide["page_layout"] = json.dumps(atlas)
+        layout = {"version": 1, "count": 1, "limit": 4, "detail": 210,
+                  "index": {"art": [], "fields": [[3, 2, 30, 1, "green", "{item0.label}"]]},
+                  "synopsis": {"art": [], "fields": [[4, 2, 30, 1, "white", "{synopsis}"]]}}
+        settings = {"EDITION_LAYOUT": json.dumps(layout),
+                    "EPISODE_DATA": json.dumps({"series": "Example", "seasons": {"1": ["Pilot"]}})}
+        guide["channels"][0]["programmes"][0].update(title="Example", sub_title="Pilot", description="First episode")
+        result = self.produce(guide, settings)
+        pages = {(p["address"]["page"], p["address"]["subcode"]): p for p in result["service"]["pages"]}
+        def content(page):
+            return [r["content"]["text"] for row in page["rows"] for r in row["runs"]]
+        self.assertEqual(result["service"]["initial_page"], 202)
+        self.assertIn("S01E01 : Pilot", content(pages[202, 0]))
+        self.assertIn("Later programme", content(pages[202, 1]))
+        self.assertIn("201 Synthetic channel", content(pages[202, 2]))
+        self.assertIn("Now: Example", content(pages[201, 0]))
+        self.assertIn("First episode", content(pages[210, 0]))
+        meta = {(p["page"]["page"], p["page"]["subcode"]): p for p in result["authoring"]["pages"]}
+        self.assertEqual(set(pages), set(meta))
+        self.assertEqual(meta[202, 0]["cycle_seconds"], 7)
+        for page in pages.values():
+            for link in page["navigation"]:
+                self.assertIn((link["target"]["page"], link["target"]["subcode"]), pages)
+        self.reject("invalid-page-map", guide, {**settings, "PAGE_MAP": json.dumps([{"page": 200}])})
+        atlas[1]["page"] = 213
+        guide["page_layout"] = json.dumps(atlas)
+        self.assertNotEqual(self.invoke(guide, settings).returncode, 0)
+
     def test_two_profiles_keep_range_theme_zone_and_input_isolated(self):
         guide = request()
         original = copy.deepcopy(guide)

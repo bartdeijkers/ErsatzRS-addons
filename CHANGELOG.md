@@ -4,6 +4,18 @@ All notable changes are recorded here using Keep a Changelog.
 
 ## [Unreleased]
 
+## [0.11.15] - 2026-11-27
+
+### Added
+
+- TV-guide teletext 0.1.6 includes profile-defined episode listing cards,
+  synopsis pages and optional season/episode labels for single-channel guides.
+
+### Fixed
+
+- Atlas on ErsatzRS 1.4 can open an episode edition alongside its assigned
+  channel listings. The designed index opens first.
+
 ## [0.11.14] - 2026-11-26
 
 ### Added
@@ -139,7 +151,8 @@ All notable changes are recorded here using Keep a Changelog.
   distinguish updated, already current, manual update required, and failed
   outcomes without exposing native diagnostic text.
 
-[Unreleased]: https://github.com/bartdeijkers/ErsatzRS-addons/compare/v0.11.14...HEAD
+[Unreleased]: https://github.com/bartdeijkers/ErsatzRS-addons/compare/v0.11.15...HEAD
+[0.11.15]: https://github.com/bartdeijkers/ErsatzRS-addons/compare/v0.11.13...v0.11.15
 [0.11.14]: https://github.com/bartdeijkers/ErsatzRS-addons/compare/v0.11.13...v0.11.14
 [0.11.13]: https://github.com/bartdeijkers/ErsatzRS-addons/compare/v0.11.12...v0.11.13
 [0.11.12]: https://github.com/bartdeijkers/ErsatzRS-addons/compare/v0.11.11...v0.11.12

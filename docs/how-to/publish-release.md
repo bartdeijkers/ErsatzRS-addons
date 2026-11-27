@@ -55,7 +55,7 @@ python3 -m zipfile -t dist/release/ErsatzRS-addons.zip
 ```
 
 Confirm the asset contains `repository.toml` and the complete `addons/` tree.
-For v0.11.14, inspect both manifest identities: TV-guide teletext 0.1.4 and
+For v0.11.15, inspect both manifest identities: TV-guide teletext 0.1.6 and
 yt-dlp 0.11.14, with host ranges accepting ErsatzRS 1.4. Repository and add-on
 versions are separate. Record the exact tag commit, all applicable validation
 and publication job results, and the downloaded ZIP digest. Compare its member

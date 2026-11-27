@@ -1,3 +1,4 @@
+import { episodeEdition } from "./edition.mts";
 // The host owns validation/publication. This pure producer uses only supplied guide data.
 const WIDTH = 36;
 const MAX_PAGES = 1024;
@@ -18,7 +19,8 @@ const THEMES: Record<string, { accent: string; layout: string }> = {
 };
 type GuideId = number | bigint;
 type Identity = { playout_id: GuideId; first_item_id: GuideId };
-type Programme = {
+export type Programme = {
+  description?: string | null;
   identity: Identity;
   start: string;
   stop: string;
@@ -27,7 +29,7 @@ type Programme = {
   sub_title: string | null;
   segments: unknown[];
 };
-type Channel = {
+export type Channel = {
   id: GuideId;
   number: string;
   name: string;
@@ -40,7 +42,7 @@ type Channel = {
     ambiguous: boolean;
   };
 };
-type Request = {
+export type Request = {
   page_layout?: string;
   schema_version: number;
   generation: string;
@@ -51,6 +53,8 @@ type Request = {
   channels: Channel[];
 };
 type Settings = {
+  edition: string;
+  catalogue: string;
   first: number;
   last: number;
   index: number;
@@ -301,6 +305,8 @@ export function settings(env: Record<string, string>): Settings {
     layout,
     header,
     footer,
+    edition: env.EDITION_LAYOUT ?? "",
+    catalogue: env.EPISODE_DATA ?? "",
     pageMap: parsePageMap(env.PAGE_MAP ?? "", first, last, index),
   };
 }
@@ -431,6 +437,9 @@ function parseRequest(source: string): Request {
 }
 
 export function generate(request: Request, config: Settings) {
+  if (config.edition && config.pageMap.length) {
+    reject("invalid-page-map", "Select one layout source per profile.");
+  }
   if (request.page_layout !== undefined) {
     if (typeof request.page_layout !== "string") {
       reject("invalid-page-map", "Expected channel page assignments.");
@@ -456,6 +465,71 @@ export function generate(request: Request, config: Settings) {
       "A bounded teletext.pages.v3 request is required.",
     );
   }
+  if (config.edition) {
+    const edition = episodeEdition(request, config, language(request.locale));
+    if (!config.pageMap.length) return edition;
+    const guide = generateGuide(request, config);
+    const index = config.pageMap.find((entry) => entry.page === config.index)!;
+    // Keep the designed index first. Atlas directory sheets follow it and
+    // retain their distinct addresses, destinations and editorial metadata.
+    const designed = edition.service.pages.filter((p) =>
+      p.address.page === index.page
+    );
+    const sheets = guide.service.pages.filter((p) =>
+      p.address.page === index.page
+    );
+    const shifted = new Map(
+      sheets.map((p, i) => [p.address.subcode, subcode(designed.length + i)]),
+    );
+    const atlasAddress = (address: { page: number; subcode: number }) =>
+      address.page === index.page
+        ? { ...address, subcode: shifted.get(address.subcode)! }
+        : address;
+    const pages = [
+      ...edition.service.pages,
+      ...guide.service.pages.map((p) => ({
+        ...p,
+        address: atlasAddress(p.address),
+        navigation: p.navigation.map((n) => ({
+          ...n,
+          target: n.target.page === index.page && n.target.subcode === 0
+            ? n.target
+            : atlasAddress(n.target),
+        })),
+      })),
+    ];
+    if (pages.length > MAX_PAGES) {
+      reject("guide-capacity", "The combined edition exceeds page capacity.");
+    }
+    const authoringPages = [
+      ...edition.authoring.pages.map((p) => ({
+        ...p,
+        ...(p.page.page === index.page && p.page.subcode === 0
+          ? { cycle_seconds: index.interval ?? 10 }
+          : {}),
+      })),
+      ...guide.authoring.pages.map(({ cycle_seconds, ...p }) => ({
+        ...p,
+        page: atlasAddress(p.page),
+        ...(cycle_seconds && p.page.page !== index.page
+          ? { cycle_seconds }
+          : {}),
+      })),
+    ];
+    return {
+      ...edition,
+      service: {
+        ...edition.service,
+        pages,
+        mot_selections: pages.map((p) => ({ display: p.address, mot: null })),
+      },
+      authoring: { ...edition.authoring, pages: authoringPages },
+    };
+  }
+  return generateGuide(request, config);
+}
+
+function generateGuide(request: Request, config: Settings) {
   const shared = config.pageMap.find((p) => p.page === config.index)?.theme;
   if (shared) {
     config = { ...config, header: shared.banner, accent: shared.accent };
@@ -956,6 +1030,8 @@ if (import.meta.main) {
           "PAGE_START",
           "PAGE_END",
           "INDEX_PAGE",
+          "EDITION_LAYOUT",
+          "EPISODE_DATA",
           "THEME",
           "ACCENT",
           "LAYOUT",

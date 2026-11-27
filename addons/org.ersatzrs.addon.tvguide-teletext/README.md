@@ -79,5 +79,33 @@ the host; a repository refresh alone does not replace the installed package.
 Version 0.1.3 extends host compatibility to ErsatzRS 1.3 in the same way;
 producer and template revision are unchanged.
 
-Version 0.1.4 adds Atlas channel page assignments and accepts ErsatzRS 1.4.
-Hosts without page assignments keep the profile defaults.
+### Single-series guides
+
+Version 0.1.5 adds two optional profile settings. The legacy projection and
+Atlas keep their existing layout when these settings are absent. Select either
+an explicit profile `PAGE_MAP` or an episode design. In 0.1.6 Atlas can
+supply channel assignments alongside that design. The designed index opens
+first, followed by the Atlas directory on subsequent index subpages. The
+assigned channel pages keep their listings. Reserve the full synopsis range
+when adding Atlas or library pages. A design takes one guide channel and uses its live
+start, stop, episode title and description. Its rolling window starts with the
+first programme whose stop is after the guide capture time.
+
+`EDITION_LAYOUT` is a JSON object with `version: 1`, `count` (listings
+per index subpage), `limit` (programmes in the edition), `detail` (first
+synopsis page) and two cards named `index` and `synopsis`. All pages must
+fit the selected profile range. A card contains `art` and `fields` arrays.
+Each art entry is `[row, column, colour, textOrMosaicCells]`, where mosaic
+cells are six-bit block masks. A field is
+`[row, column, width, height, colour, format]`. Rows start at 1 and columns
+at 0. Leave a blank cell before colour or graphics changes. Text wraps to
+the slot width and overflows onto additional subpages.
+
+Synopsis fields accept `{title}`, `{code}`, `{label}` (code and title),
+`{synopsis}`, `{date}`, `{time}`, `{stop}`, `{minutes}`, `{page}` and
+`{index}`. Index entries prefix programme fields with `item0.`, `item1.`
+and so forth. `EPISODE_DATA` can supply numbers when the host guide omits
+them: `{"series":"Example","seasons":{"1":["Pilot",null,"Home"]}}`.
+The series title and episode title must match. Missing and ambiguous
+matches show the title alone. All artwork, editorial text and the episode
+directory belong to the channel profile.
